@@ -17,6 +17,8 @@ public class G039HW1{
 
         // Parameters parsing
 
+        // Read the file
+
     }
 
     public static void ExactOutliers(ArrayList<Point> points){

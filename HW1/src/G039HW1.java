@@ -1,13 +1,5 @@
-import java.awt.*;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.List;
-
-import org.apache.spark.SparkConf;
-import org.apache.spark.api.java.JavaPairRDD;
-import org.apache.spark.api.java.JavaRDD;
-import org.apache.spark.api.java.JavaSparkContext;
-import scala.Tuple2;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -15,27 +7,30 @@ import java.util.stream.Collectors;
 
 import scala.Tuple2;
 
+import org.apache.spark.SparkConf;
+import org.apache.spark.api.java.JavaPairRDD;
+import org.apache.spark.api.java.JavaRDD;
+import org.apache.spark.api.java.JavaSparkContext;
+
 public class G039HW1{
 
 
     public static void main(String[] args) throws IOException {
-        // &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
-        // CHECKING NUMBER OF CMD LINE PARAMETERS
-        // Parameters are: num_partitions, <path_to_file>
-        // &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
 
+        // checking the number of command-line arguments
         if (args.length != 5) {
             throw new IllegalArgumentException("USAGE: file_path D M K L");
         }
 
         //Prints the command-line arguments and stores D,M,K,L
         // into suitable variables
+        String path = args[0];
         float D = Float.parseFloat(args[1]);
         int M = Integer.parseInt(args[2]);
         int L = Integer.parseInt(args[3]);
         int K = Integer.parseInt(args[4]);
         for(int i = 0; i< args.length; i++) {
-            System.out.println(String.format("Command Line Argument %d is %s", i, args[i]));
+            System.out.printf("Command Line Argument %d is %s%n", i, args[i]);
         }
 
         // &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
@@ -46,7 +41,7 @@ public class G039HW1{
         JavaSparkContext sc = new JavaSparkContext(conf);
         sc.setLogLevel("WARN");
 
-        String path = "TestN15-input.txt";
+
 
         // INPUT READING
         //Reads the input points into an RDD of strings (called rawData)
@@ -66,16 +61,13 @@ public class G039HW1{
 
         //Only if the number of points is at most 200000:
         //Downloads the points into a list called listOfPoints
-        ArrayList<List<Tuple2<Float, Float>>> listOfPoints = new ArrayList<>();
-        if(inputPoints.count() < 20000){
-            for (int i = 0; i < inputPoints.count(); i++) {
-                listOfPoints.add(inputPoints.collect());
-            }
+        if(inputPoints.count() <= 200000){
+            ArrayList<Tuple2<Float, Float>> listOfPoints = new ArrayList<>(inputPoints.collect());
             //Executes ExactOutliers with parameters listOfPoints,  D,M and K
             //The execution will print the information specified above.
             //Prints ExactOutliers' running time.
 
-            //ExactOutliers(listOfPoints, D, M, K);
+            ExactOutliers(listOfPoints, D, M, K);
         }
 
         //In all cases:

@@ -137,7 +137,22 @@ public class G039HW1{
     }
 
     public static void MRApproxOutliers(JavaPairRDD<Float, Float> points, float D, int M, int K){
+        JavaPairRDD<Tuple2<Integer, Integer>, Integer> cellSize;
         // Step A: Transform input RDD into an RDD of non-empty cells with their point counts
+        //cellSize = points.flatMapToPair((document) -> {    // <-- MAP PHASE (R1) - (x_i, y_i) --> ((i,j), 1)
+
+        //}).mapPartitionsToPair((element) -> {    // <-- REDUCE PHASE (R1)
+
+        //}).reduceBykey((x,y) -> {   // <-- REDUCE PHASE (R2)
+
+        //});
+
         // Step B: Compute N3 and N7 for each cell
+        //cellSize.flatMapToPair((element) -> {
+
+        //}).flatMapToPair((element) -> { //NO SHUFFLING NEEDED
+
+        //});
+
     }
 }

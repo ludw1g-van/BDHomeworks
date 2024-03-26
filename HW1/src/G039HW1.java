@@ -27,11 +27,9 @@ public class G039HW1{
         String path = args[0];
         float D = Float.parseFloat(args[1]);
         int M = Integer.parseInt(args[2]);
-        int L = Integer.parseInt(args[3]);
-        int K = Integer.parseInt(args[4]);
-        for(int i = 0; i< args.length; i++) {
-            System.out.printf("Command Line Argument %d is %s%n", i, args[i]);
-        }
+        int K = Integer.parseInt(args[3]);
+        int L = Integer.parseInt(args[4]);
+        System.out.println(path + " D=" + D + " M=" + M + " K=" + K + " L=" + L);
 
         // &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
         // SPARK SETUP
@@ -57,31 +55,33 @@ public class G039HW1{
 
 
         //Prints the total number of points.
-        System.out.println(inputPoints.count());
+        System.out.println("Number of points = " + inputPoints.count());
 
+        long start, stop;
         //Only if the number of points is at most 200000:
         //Downloads the points into a list called listOfPoints
         if(inputPoints.count() <= 200000){
             ArrayList<Tuple2<Float, Float>> listOfPoints = new ArrayList<>(inputPoints.collect());
             //Executes ExactOutliers with parameters listOfPoints,  D,M and K
-            //The execution will print the information specified above.
-            //Prints ExactOutliers' running time.
-
+            start = System.currentTimeMillis();
             ExactOutliers(listOfPoints, D, M, K);
+            stop = System.currentTimeMillis();
+
+            //Prints ExactOutliers' running time.
+            System.out.printf("Running time of ExactOutliers = %d ms\n", stop - start);
         }
 
         //In all cases:
-        //Executes MRApproxOutliers with parameters inputPoints, D,M
-        // and K
-        //. The execution will print the information specified above.
+        //Executes MRApproxOutliers with parameters inputPoints, D, M and K
+
+        start = System.currentTimeMillis();
+        MRApproxOutliers(inputPoints, D, M, K);
+        stop = System.currentTimeMillis();
+
         //Prints MRApproxOutliers' running time.
-
-        //MRApproxOutliers(inputPoints, D, M, K);
-
-        //File OutputFormat.txt (TO BE ADDED) shows you how to format your output. Make sure that your program complies with this format.
+        System.out.printf("Running time of MRApproxOutliers = %d ms\n", stop - start);
 
         sc.close();
-
     }
 
     public static void ExactOutliers(ArrayList<Tuple2<Float, Float>> points, float D, int M, int K){
@@ -90,9 +90,6 @@ public class G039HW1{
         for (Tuple2<Float, Float> point1 : points) {
             int pointsInsideTheBall = 0;
             for (Tuple2<Float, Float> point2 : points) {
-
-                // Don't compute the distance for the same point
-                if(point1 == point2) continue;
 
                 // Compute the distance
                 double distance = Math.sqrt(Math.pow(point2._1 - point1._1, 2) + Math.pow(point2._2 - point1._2, 2));
@@ -103,21 +100,18 @@ public class G039HW1{
                 }
             }
 
-            System.out.print("The point (" + point1._1 + ", " +  point1._2 + ")" + " is an ");
+            //System.out.print("The point (" + point1._1() + ", " +  point1._2() + ")" + " is an ");
 
             // If the point is an outlier add it to the outlier neighbour list and increment the outliers count
             if(pointsInsideTheBall <= M){
                 outlierNeighCount.put(new Tuple2<>(point1._1, point1._2), pointsInsideTheBall);
                 outliersCount++;
-                System.out.print("OUTLIER\n");
-            } else {
-                System.out.print("non-OUTLIER\n");
+                //System.out.print("OUTLIER\n");
             }
         }
 
         // Print the outlier count
-        System.out.println("Outliers count: " + outliersCount);
-
+        System.out.println("Number of Outliers = " + outliersCount);
         //Sorting the hashmap
         HashMap<Tuple2<Float, Float>, Integer> sortedNeighbourCount = outlierNeighCount.entrySet().stream()
                 .sorted(Map.Entry.comparingByValue())
@@ -127,7 +121,7 @@ public class G039HW1{
         // Print the sorted hashMap (only the first K elements)
         int count = 0;
         for (Map.Entry<Tuple2<Float, Float>, Integer> entry : sortedNeighbourCount.entrySet()) {
-            System.out.println(entry.getKey() + " " + entry.getValue());
+            System.out.println("Point: " + "(" + entry.getKey()._1() + "," + entry.getKey()._2() + ")");
             count++;
             if (count >= K) {
                 break;

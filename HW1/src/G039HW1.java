@@ -1,8 +1,5 @@
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 import scala.Tuple2;
@@ -31,14 +28,10 @@ public class G039HW1{
         int L = Integer.parseInt(args[4]);
         System.out.println(path + " D=" + D + " M=" + M + " K=" + K + " L=" + L);
 
-        // &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
         // SPARK SETUP
-        // &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
-
-        SparkConf conf = new SparkConf(true).setAppName("OutlineDetection");
+        SparkConf conf = new SparkConf(true).setAppName("OutlierDetection");
         JavaSparkContext sc = new JavaSparkContext(conf);
         sc.setLogLevel("WARN");
-
 
 
         // INPUT READING
@@ -154,7 +147,6 @@ public class G039HW1{
         // Step B: Compute N3 and N7 for each cell
 
         HashMap<Tuple2<Integer, Integer>,Integer> nonEmptyCells = new HashMap<>(cellSize.collectAsMap());
-        System.out.println("Non empty cells" + nonEmptyCells);
         JavaPairRDD<Tuple2<Integer, Integer>, Tuple2<Integer, Integer>> cellInfoRDD = cellSize.mapToPair(cell -> {
             final int i = cell._1()._1();
             final int j = cell._1()._2();
@@ -184,7 +176,6 @@ public class G039HW1{
             return new Tuple2<>(cell._1(), new Tuple2<>(N3, N7));
         });
 
-        System.out.println(cellInfoRDD.collect());
 
         // Collect information and print results
         ArrayList<Tuple2<Tuple2<Integer, Integer>, Tuple2<Integer, Integer>>> cellInfoList = new ArrayList<>(cellInfoRDD.collect());
@@ -194,10 +185,9 @@ public class G039HW1{
             int N3 = cellInfo._2()._1();
             int N7 = cellInfo._2()._2();
             if (N7 <= M) {
-                nonEmptyCells.get(cellInfo._1());
-                sureOutliers++;
-            } else if(N3 <= M){
-                uncertainPoints++;
+                sureOutliers += nonEmptyCells.get(cellInfo._1());
+            } else if (N3 <= M){
+                uncertainPoints += nonEmptyCells.get(cellInfo._1());
             }
         }
 
@@ -211,6 +201,5 @@ public class G039HW1{
                 .forEach((el) -> {
                     System.out.printf("Cell: (%d,%d)  Size = %d\n", el._2()._1(), el._2()._2(), el._1());
                 });
-
     }
 }

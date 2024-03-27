@@ -136,36 +136,28 @@ public class G039HW1{
         JavaPairRDD<Tuple2<Integer, Integer>, Integer> cellSize;
         cellSize = points.mapToPair((document) -> {    // <-- MAP PHASE (R1) - (x_i, y_i) --> ((i,j), 1)
             Tuple2<Tuple2<Integer, Integer>, Integer> pair;
-            HashMap<Tuple2<Integer, Integer>, Integer> cellCoords;
 
             // Cell coordinates
-            double side = D/(2*Math.sqrt(2));
+            double side =  (D/(2*Math.sqrt(2)));
             int i = (int) Math.floor(document._1()/side);
             int j = (int) Math.floor(document._2()/side);
-
+//            System.out.printf("(%f, %f) --> (%d, %d) side=%f\n", document._1(), document._2(), i, j, side);
             pair = new Tuple2<>(new Tuple2<>(i,j), 1);
-            System.out.println("Call to map to pair " + document);
+//            System.out.println("Call to map to pair " + document);
             return pair;
         }).reduceByKey((x,y) -> {
-            System.out.println("Call to re by key " + x + " " + y);
+//            System.out.println("Call to re by key " + x + " " + y);
             return x + y;
-        });//.aggregate().flatMapToPair((el) -> {
-//            System.out.println(el);
-//            Integer i = 2;
-//            Integer j = 3;
-//            Tuple2<Tuple2<Integer, Integer>, Integer> pair;
-//            pair = new Tuple2<>(new Tuple2<>(i,j), 1);
-//            return pair;
-//        });// <-- REDUCE PHASE (R1);
-
+        });
 
 
         // Step B: Compute N3 and N7 for each cell
 
         HashMap<Tuple2<Integer, Integer>,Integer> nonEmptyCells = new HashMap<>(cellSize.collectAsMap());
+        System.out.println("Non empty cells" + nonEmptyCells);
         JavaPairRDD<Tuple2<Integer, Integer>, Tuple2<Integer, Integer>> cellInfoRDD = cellSize.mapToPair(cell -> {
-            int i = cell._1()._1();
-            int j = cell._1()._2();
+            final int i = cell._1()._1();
+            final int j = cell._1()._2();
             int N3 = 0;
             int N7 = 0;
 
@@ -194,7 +186,31 @@ public class G039HW1{
 
         System.out.println(cellInfoRDD.collect());
 
-        
+        // Collect information and print results
+        ArrayList<Tuple2<Tuple2<Integer, Integer>, Tuple2<Integer, Integer>>> cellInfoList = new ArrayList<>(cellInfoRDD.collect());
+        int sureOutliers = 0;
+        int uncertainPoints = 0;
+        for (Tuple2<Tuple2<Integer, Integer>, Tuple2<Integer, Integer>> cellInfo : cellInfoList) {
+            int N3 = cellInfo._2()._1();
+            int N7 = cellInfo._2()._2();
+            if (N7 <= M) {
+                nonEmptyCells.get(cellInfo._1());
+                sureOutliers++;
+            } else if(N3 <= M){
+                uncertainPoints++;
+            }
+        }
+
+        System.out.println("Number of sure outliers = " + sureOutliers);
+        System.out.println("Number of uncertain points = " + uncertainPoints);
+
+        //The first K non-empty cells,  in non-decreasing order of cell size, printing, for each such cell, its identifier and its size.
+        cellSize.mapToPair((el) -> new Tuple2<>(el._2(), el._1()))
+                .sortByKey()
+                .take(K)
+                .forEach((el) -> {
+                    System.out.printf("Cell: (%d,%d)  Size = %d\n", el._2()._1(), el._2()._2(), el._1());
+                });
 
     }
 }

@@ -131,22 +131,70 @@ public class G039HW1{
     }
 
     public static void MRApproxOutliers(JavaPairRDD<Float, Float> points, float D, int M, int K){
-        JavaPairRDD<Tuple2<Integer, Integer>, Integer> cellSize;
+
         // Step A: Transform input RDD into an RDD of non-empty cells with their point counts
-        //cellSize = points.flatMapToPair((document) -> {    // <-- MAP PHASE (R1) - (x_i, y_i) --> ((i,j), 1)
+        JavaPairRDD<Tuple2<Integer, Integer>, Integer> cellSize;
+        cellSize = points.mapToPair((document) -> {    // <-- MAP PHASE (R1) - (x_i, y_i) --> ((i,j), 1)
+            Tuple2<Tuple2<Integer, Integer>, Integer> pair;
+            HashMap<Tuple2<Integer, Integer>, Integer> cellCoords;
 
-        //}).mapPartitionsToPair((element) -> {    // <-- REDUCE PHASE (R1)
+            // Cell coordinates
+            double side = D/(2*Math.sqrt(2));
+            int i = (int) Math.floor(document._1()/side);
+            int j = (int) Math.floor(document._2()/side);
 
-        //}).reduceBykey((x,y) -> {   // <-- REDUCE PHASE (R2)
+            pair = new Tuple2<>(new Tuple2<>(i,j), 1);
+            System.out.println("Call to map to pair " + document);
+            return pair;
+        }).reduceByKey((x,y) -> {
+            System.out.println("Call to re by key " + x + " " + y);
+            return x + y;
+        });//.aggregate().flatMapToPair((el) -> {
+//            System.out.println(el);
+//            Integer i = 2;
+//            Integer j = 3;
+//            Tuple2<Tuple2<Integer, Integer>, Integer> pair;
+//            pair = new Tuple2<>(new Tuple2<>(i,j), 1);
+//            return pair;
+//        });// <-- REDUCE PHASE (R1);
 
-        //});
+
 
         // Step B: Compute N3 and N7 for each cell
-        //cellSize.flatMapToPair((element) -> {
 
-        //}).flatMapToPair((element) -> { //NO SHUFFLING NEEDED
+        HashMap<Tuple2<Integer, Integer>,Integer> nonEmptyCells = new HashMap<>(cellSize.collectAsMap());
+        JavaPairRDD<Tuple2<Integer, Integer>, Tuple2<Integer, Integer>> cellInfoRDD = cellSize.mapToPair(cell -> {
+            int i = cell._1()._1();
+            int j = cell._1()._2();
+            int N3 = 0;
+            int N7 = 0;
 
-        //});
+            // Calculate N3
+            for (int l = i - 1; l <= i + 1; l++) {
+                for (int m = j - 1; m <= j + 1; m++) {
+                    Tuple2<Integer, Integer> tmpPoint = new Tuple2<>(l,m);
+                    if (nonEmptyCells.get(tmpPoint) != null) {
+                        N3 += nonEmptyCells.get(tmpPoint);
+                    }
+                }
+            }
+
+            // Calculate N7
+            for (int l = i - 3; l <= i + 3; l++) {
+                for (int m = j - 3; m <= j + 3; m++) {
+                    Tuple2<Integer, Integer> tmpPoint = new Tuple2<>(l,m);
+                    if (nonEmptyCells.get(tmpPoint) != null) {
+                        N7 += nonEmptyCells.get(tmpPoint);
+                    }
+                }
+            }
+
+            return new Tuple2<>(cell._1(), new Tuple2<>(N3, N7));
+        });
+
+        System.out.println(cellInfoRDD.collect());
+
+        
 
     }
 }

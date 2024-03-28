@@ -79,10 +79,10 @@ public class G039HW1{
             for (Tuple2<Float, Float> point2 : points) {
 
                 // Compute the distance
-                double distance = Math.sqrt(Math.pow(point2._1 - point1._1, 2) + Math.pow(point2._2 - point1._2, 2));
+                double distanceSquared = Math.pow(point2._1 - point1._1, 2) + Math.pow(point2._2 - point1._2, 2);
 
                 // The point2 is in the ball of radios D (B(point1, D))
-                if (distance <= D){
+                if (distanceSquared <= Math.pow(D,2)){
                     pointsInsideTheBall++;
                 }
             }

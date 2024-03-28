@@ -14,13 +14,12 @@ public class G039HW1{
 
     public static void main(String[] args) throws IOException {
 
-        // checking the number of command-line arguments
+        // Checking the number of command-line arguments
         if (args.length != 5) {
             throw new IllegalArgumentException("USAGE: file_path D M K L");
         }
 
-        //Prints the command-line arguments and stores D,M,K,L
-        // into suitable variables
+        // Prints the command-line arguments and stores D,M,K,L
         String path = args[0];
         float D = Float.parseFloat(args[1]);
         int M = Integer.parseInt(args[2]);
@@ -35,10 +34,7 @@ public class G039HW1{
 
 
         // INPUT READING
-        //Reads the input points into an RDD of strings (called rawData)
-        // and transform it into an RDD of points (called inputPoints),
-        // represented as pairs of floats, subdivided into L partitions.
-        JavaRDD<String> rawData = sc.textFile(path); //sc.textFile(args[0])
+        JavaRDD<String> rawData = sc.textFile(path);
         JavaPairRDD<Float, Float> inputPoints = rawData.mapToPair(line -> {
             String[] parts = line.split(",");
             float x = Float.parseFloat(parts[0]);
@@ -47,12 +43,11 @@ public class G039HW1{
         }).repartition(L).cache();
 
 
-        //Prints the total number of points.
+        // Print the total number of points
         System.out.println("Number of points = " + inputPoints.count());
 
         long start, stop;
-        //Only if the number of points is at most 200000:
-        //Downloads the points into a list called listOfPoints
+        // Only if the number of points is at most 200000: Download the points into a list called listOfPoints
         if(inputPoints.count() <= 200000){
             ArrayList<Tuple2<Float, Float>> listOfPoints = new ArrayList<>(inputPoints.collect());
             //Executes ExactOutliers with parameters listOfPoints,  D,M and K
@@ -64,14 +59,13 @@ public class G039HW1{
             System.out.printf("Running time of ExactOutliers = %d ms\n", stop - start);
         }
 
-        //In all cases:
-        //Executes MRApproxOutliers with parameters inputPoints, D, M and K
+        // In all cases: execute MRApproxOutliers with parameters inputPoints, D, M and K
 
         start = System.currentTimeMillis();
         MRApproxOutliers(inputPoints, D, M, K);
         stop = System.currentTimeMillis();
 
-        //Prints MRApproxOutliers' running time.
+        // Print MRApproxOutliers running time.
         System.out.printf("Running time of MRApproxOutliers = %d ms\n", stop - start);
 
         sc.close();
@@ -93,19 +87,17 @@ public class G039HW1{
                 }
             }
 
-            //System.out.print("The point (" + point1._1() + ", " +  point1._2() + ")" + " is an ");
-
             // If the point is an outlier add it to the outlier neighbour list and increment the outliers count
             if(pointsInsideTheBall <= M){
                 outlierNeighCount.put(new Tuple2<>(point1._1, point1._2), pointsInsideTheBall);
                 outliersCount++;
-                //System.out.print("OUTLIER\n");
             }
         }
 
         // Print the outlier count
         System.out.println("Number of Outliers = " + outliersCount);
-        //Sorting the hashmap
+
+        // Sorting the hashmap
         HashMap<Tuple2<Float, Float>, Integer> sortedNeighbourCount = outlierNeighCount.entrySet().stream()
                 .sorted(Map.Entry.comparingByValue())
                 .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue,
@@ -120,13 +112,13 @@ public class G039HW1{
                 break;
             }
         }
-
     }
 
     public static void MRApproxOutliers(JavaPairRDD<Float, Float> points, float D, int M, int K){
 
         // Step A: Transform input RDD into an RDD of non-empty cells with their point counts
         JavaPairRDD<Tuple2<Integer, Integer>, Integer> cellSize;
+
         cellSize = points.mapToPair((document) -> {    // <-- MAP PHASE (R1) - (x_i, y_i) --> ((i,j), 1)
             Tuple2<Tuple2<Integer, Integer>, Integer> pair;
 
@@ -134,18 +126,12 @@ public class G039HW1{
             double side =  (D/(2*Math.sqrt(2)));
             int i = (int) Math.floor(document._1()/side);
             int j = (int) Math.floor(document._2()/side);
-//            System.out.printf("(%f, %f) --> (%d, %d) side=%f\n", document._1(), document._2(), i, j, side);
             pair = new Tuple2<>(new Tuple2<>(i,j), 1);
-//            System.out.println("Call to map to pair " + document);
             return pair;
-        }).reduceByKey((x,y) -> {
-//            System.out.println("Call to re by key " + x + " " + y);
-            return x + y;
-        });
+        }).reduceByKey(Integer::sum);
 
 
         // Step B: Compute N3 and N7 for each cell
-
         HashMap<Tuple2<Integer, Integer>,Integer> nonEmptyCells = new HashMap<>(cellSize.collectAsMap());
         JavaPairRDD<Tuple2<Integer, Integer>, Tuple2<Integer, Integer>> cellInfoRDD = cellSize.mapToPair(cell -> {
             final int i = cell._1()._1();
@@ -194,12 +180,10 @@ public class G039HW1{
         System.out.println("Number of sure outliers = " + sureOutliers);
         System.out.println("Number of uncertain points = " + uncertainPoints);
 
-        //The first K non-empty cells,  in non-decreasing order of cell size, printing, for each such cell, its identifier and its size.
+        // The first K non-empty cells, in non-decreasing order of cell size, printing, for each such cell, its identifier and its size.
         cellSize.mapToPair((el) -> new Tuple2<>(el._2(), el._1()))
                 .sortByKey()
                 .take(K)
-                .forEach((el) -> {
-                    System.out.printf("Cell: (%d,%d)  Size = %d\n", el._2()._1(), el._2()._2(), el._1());
-                });
+                .forEach((el) -> System.out.printf("Cell: (%d,%d)  Size = %d\n", el._2()._1(), el._2()._2(), el._1()));
     }
 }

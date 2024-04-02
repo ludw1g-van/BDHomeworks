@@ -119,13 +119,13 @@ public class G039HW1{
         // Step A: Transform input RDD into an RDD of non-empty cells with their point counts
         JavaPairRDD<Tuple2<Integer, Integer>, Integer> cellSize;
 
-        cellSize = points.mapToPair((document) -> {    // <-- MAP PHASE (R1) - (x_i, y_i) --> ((i,j), 1)
+        cellSize = points.mapToPair((point) -> {    // <-- MAP PHASE (R1) - (x_i, y_i) --> ((i,j), 1)
             Tuple2<Tuple2<Integer, Integer>, Integer> pair;
 
             // Cell coordinates
             double side =  (D/(2*Math.sqrt(2)));
-            int i = (int) Math.floor(document._1()/side);
-            int j = (int) Math.floor(document._2()/side);
+            int i = (int) Math.floor(point._1()/side);
+            int j = (int) Math.floor(point._2()/side);
             pair = new Tuple2<>(new Tuple2<>(i,j), 1);
             return pair;
         }).reduceByKey(Integer::sum);

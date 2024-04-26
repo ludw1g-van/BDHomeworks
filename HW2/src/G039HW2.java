@@ -15,20 +15,19 @@ public class G039HW2{
     public static void main(String[] args) throws IOException {
 
         // Checking the number of command-line arguments
-        if (args.length != 5) {
-            throw new IllegalArgumentException("USAGE: file_path D M K L");
+        if (args.length != 4) {
+            throw new IllegalArgumentException("USAGE: file_path M K L");
         }
 
-        // Prints the command-line arguments and stores D,M,K,L
+        // Prints the command-line arguments and stores M,K,L
         String path = args[0];
-        float D = Float.parseFloat(args[1]);
-        int M = Integer.parseInt(args[2]);
-        int K = Integer.parseInt(args[3]);
-        int L = Integer.parseInt(args[4]);
-        System.out.println(path + " D=" + D + " M=" + M + " K=" + K + " L=" + L);
+        int M = Integer.parseInt(args[1]);
+        int K = Integer.parseInt(args[2]);
+        int L = Integer.parseInt(args[3]);
+        System.out.println(path + " M=" + M + " K=" + K + " L=" + L);
 
         // SPARK SETUP
-        SparkConf conf = new SparkConf(true).setAppName("OutlierDetection");
+        SparkConf conf = new SparkConf(true).setAppName("Clustering");
         JavaSparkContext sc = new JavaSparkContext(conf);
         sc.setLogLevel("WARN");
 
@@ -46,23 +45,20 @@ public class G039HW2{
         // Print the total number of points
         System.out.println("Number of points = " + inputPoints.count());
 
+        //  Farthest-First Traversal algorithm through standard sequential code
+        ArrayList<Integer> C = new ArrayList<Integer>();
+        ArrayList<Tuple2<Float, Float>> listOfPoints = new ArrayList<>(inputPoints.collect());
+        C = SequentialFFT(listOfPoints, K);
+
+        // MRFFT: 3 round MapReduce algorithm
+        float D;
+        D = MRFFT(inputPoints, K);
+
+        // MRApproxOutliers HW1
         long start, stop;
-        // Only if the number of points is at most 200000: Download the points into a list called listOfPoints
-        if(inputPoints.count() <= 200000){
-            ArrayList<Tuple2<Float, Float>> listOfPoints = new ArrayList<>(inputPoints.collect());
-            //Executes ExactOutliers with parameters listOfPoints,  D,M and K
-            start = System.currentTimeMillis();
-            ExactOutliers(listOfPoints, D, M, K);
-            stop = System.currentTimeMillis();
-
-            //Prints ExactOutliers' running time.
-            System.out.printf("Running time of ExactOutliers = %d ms\n", stop - start);
-        }
-
-        // In all cases: execute MRApproxOutliers with parameters inputPoints, D, M and K
 
         start = System.currentTimeMillis();
-        MRApproxOutliers(inputPoints, D, M, K);
+        MRApproxOutliers(inputPoints, D, M);
         stop = System.currentTimeMillis();
 
         // Print MRApproxOutliers running time.
@@ -71,50 +67,36 @@ public class G039HW2{
         sc.close();
     }
 
-    public static void ExactOutliers(ArrayList<Tuple2<Float, Float>> points, float D, int M, int K){
-        int outliersCount = 0;
-        HashMap<Tuple2<Float, Float>, Integer> outlierNeighCount = new HashMap<>();
-        for (Tuple2<Float, Float> point1 : points) {
-            int pointsInsideTheBall = 0;
-            for (Tuple2<Float, Float> point2 : points) {
+    public static ArrayList<Integer> SequentialFFT(ArrayList<Tuple2<Float, Float>> points, int K){
 
-                // Compute the distance
-                double distanceSquared = Math.pow(point2._1 - point1._1, 2) + Math.pow(point2._2 - point1._2, 2);
+        //SequentialFFT takes in input a set P of points and an integer parameter K,
+        //and must return a set C of K centers.
+        //Both p and C must be represented as lists (ArrayList in Java and list in Python).
+        //The implementation should run in O(|P|⋅K) time.
 
-                // The point2 is in the ball of radios D (B(point1, D))
-                if (distanceSquared <= Math.pow(D,2)){
-                    pointsInsideTheBall++;
-                }
-            }
-
-            // If the point is an outlier add it to the outlier neighbour list and increment the outliers count
-            if(pointsInsideTheBall <= M){
-                outlierNeighCount.put(new Tuple2<>(point1._1, point1._2), pointsInsideTheBall);
-                outliersCount++;
-            }
-        }
-
-        // Print the outlier count
-        System.out.println("Number of Outliers = " + outliersCount);
-
-        // Sorting the hashmap
-        HashMap<Tuple2<Float, Float>, Integer> sortedNeighbourCount = outlierNeighCount.entrySet().stream()
-                .sorted(Map.Entry.comparingByValue())
-                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue,
-                        (e1, e2) -> e1, LinkedHashMap::new));
-
-        // Print the sorted hashMap (only the first K elements)
-        int count = 0;
-        for (Map.Entry<Tuple2<Float, Float>, Integer> entry : sortedNeighbourCount.entrySet()) {
-            System.out.println("Point: " + "(" + entry.getKey()._1() + "," + entry.getKey()._2() + ")");
-            count++;
-            if (count >= K) {
-                break;
-            }
-        }
+        return null;
     }
 
-    public static void MRApproxOutliers(JavaPairRDD<Float, Float> points, float D, int M, int K){
+    public static float MRFFT(JavaPairRDD<Float, Float> points, int K){
+
+        //Rounds 1 and 2 compute a set C of K centers, using the MR-FarthestFirstTraversal algorithm described in class.
+        // The coreset computed in Round 1, must be gathered in an ArrayList in Java and,
+        // in Round 2, the centers are obtained by running SequentialFFT on the coreset.
+
+        //Round 3 computes and returns the radius R of the clustering induced by the centers,
+        //that is the maximum, over all points x∈P, of the distance dist(x,C).
+        //The radius R must be a float. To compute R you cannot download P
+        //into a local data structure, since it may be very large, and must keep it stored as an RDD.
+        // However, the set of centers C computed in Round 2, can be used as a global variable.
+        //To this purpose we ask you to copy C into a broadcast variable
+        // which can be accessed by the RDD methods that will be used to compute R.
+
+        //MRFFT must compute and print, separately, the running time required by each of the above 3 rounds.
+
+        return 0;
+    }
+
+    public static void MRApproxOutliers(JavaPairRDD<Float, Float> points, float D, int M){
 
         // Step A: Transform input RDD into an RDD of non-empty cells with their point counts
         JavaPairRDD<Tuple2<Integer, Integer>, Integer> cellSize;
@@ -179,11 +161,5 @@ public class G039HW2{
 
         System.out.println("Number of sure outliers = " + sureOutliers);
         System.out.println("Number of uncertain points = " + uncertainPoints);
-
-        // The first K non-empty cells, in non-decreasing order of cell size, printing, for each such cell, its identifier and its size.
-        cellSize.mapToPair((el) -> new Tuple2<>(el._2(), el._1()))
-                .sortByKey()
-                .take(K)
-                .forEach((el) -> System.out.printf("Cell: (%d,%d)  Size = %d\n", el._2()._1(), el._2()._2(), el._1()));
     }
 }

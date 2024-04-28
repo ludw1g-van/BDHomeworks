@@ -1,6 +1,5 @@
 import java.io.IOException;
 import java.util.*;
-import java.util.stream.Collectors;
 
 import scala.Tuple2;
 
@@ -46,19 +45,19 @@ public class G039HW2{
         System.out.println("Number of points = " + inputPoints.count());
 
         //  Farthest-First Traversal algorithm through standard sequential code
-        ArrayList<Integer> C = new ArrayList<Integer>();
+        ArrayList<Tuple2<Float, Float>> C = new ArrayList<Tuple2<Float, Float>>();
         ArrayList<Tuple2<Float, Float>> listOfPoints = new ArrayList<>(inputPoints.collect());
         C = SequentialFFT(listOfPoints, K);
 
         // MRFFT: 3 round MapReduce algorithm
         float D;
-        D = MRFFT(inputPoints, K);
+        //D = MRFFT(inputPoints, K);
 
         // MRApproxOutliers HW1
         long start, stop;
 
         start = System.currentTimeMillis();
-        MRApproxOutliers(inputPoints, D, M);
+        //MRApproxOutliers(inputPoints, D, M);
         stop = System.currentTimeMillis();
 
         // Print MRApproxOutliers running time.
@@ -67,14 +66,52 @@ public class G039HW2{
         sc.close();
     }
 
-    public static ArrayList<Integer> SequentialFFT(ArrayList<Tuple2<Float, Float>> points, int K){
+    //SequentialFFT takes in input a set P of points and an integer parameter K,
+    //and must return a set C of K centers.
+    //Both p and C must be represented as lists (ArrayList in Java and list in Python).
+    //The implementation should run in O(|P|⋅K) time.
+    public static ArrayList<Tuple2<Float, Float>> SequentialFFT(ArrayList<Tuple2<Float, Float>> points, int K){
 
-        //SequentialFFT takes in input a set P of points and an integer parameter K,
-        //and must return a set C of K centers.
-        //Both p and C must be represented as lists (ArrayList in Java and list in Python).
-        //The implementation should run in O(|P|⋅K) time.
+        ArrayList<Tuple2<Float, Float>> centers = new ArrayList<Tuple2<Float, Float>>();
 
-        return null;
+        centers.add(points.get(0));
+
+        for(int i = 1; i <= K; i++){
+            Tuple2<Float, Float> point;
+            point = maxDistance(points, centers);
+            centers.add(point);
+        }
+
+        return centers;
+    }
+
+    private static Tuple2<Float, Float> maxDistance(ArrayList<Tuple2<Float, Float>> points, ArrayList<Tuple2<Float, Float>> centers){
+        //Tuple2<Float, Float> maxElement;
+        double distance = 0;
+        Tuple2<Float, Float> point = null;
+        HashMap<Tuple2<Float, Float>, Double> pairPointDistance = new HashMap<Tuple2<Float, Float>, Double>();
+
+        for(Tuple2<Float, Float> elem : points){
+            if(!centers.contains(elem)){
+                for(int i=0; i<centers.size(); i++){
+                    double d1 = 0;
+                    double d2 = 0;
+                    d1 = elem._1()-centers.get(i)._1();
+                    d2 = elem._2()-centers.get(i)._2();
+
+                    double distanceTemp = Math.sqrt(Math.pow(d1, 2)+Math.pow(d2, 2));
+                    if(distance<distanceTemp){
+                        distance = distanceTemp;
+                    }
+                }
+                pairPointDistance.put(elem, distance);
+                // if(maxElement.distance<elem.distance){
+                //     maxElement = elem;
+                // }
+            }
+        }
+        point = Collections.max(pairPointDistance.entrySet(), Map.Entry.comparingByValue()).getKey();
+        return point;
     }
 
     public static float MRFFT(JavaPairRDD<Float, Float> points, int K){
@@ -87,9 +124,9 @@ public class G039HW2{
         //that is the maximum, over all points x∈P, of the distance dist(x,C).
         //The radius R must be a float. To compute R you cannot download P
         //into a local data structure, since it may be very large, and must keep it stored as an RDD.
-        // However, the set of centers C computed in Round 2, can be used as a global variable.
+        //However, the set of centers C computed in Round 2, can be used as a global variable.
         //To this purpose we ask you to copy C into a broadcast variable
-        // which can be accessed by the RDD methods that will be used to compute R.
+        //which can be accessed by the RDD methods that will be used to compute R.
 
         //MRFFT must compute and print, separately, the running time required by each of the above 3 rounds.
 

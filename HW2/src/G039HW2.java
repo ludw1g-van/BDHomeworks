@@ -11,7 +11,6 @@ import org.apache.spark.api.java.JavaSparkContext;
 
 public class G039HW2{
 
-
     public static void main(String[] args) throws IOException {
 
         // Checking the number of command-line arguments
@@ -145,7 +144,7 @@ public class G039HW2{
      * @param K
      * @return
      */
-    public static float MRFFT(JavaPairRDD<Float, Float> points, int K){
+    public static Iterator<Tuple2<String, Long>> MRFFT(JavaPairRDD<Float, Float> points, int K){
 
         //Rounds 1 and 2 compute a set C of K centers, using the MR-FarthestFirstTraversal algorithm described in class.
         // The coreset computed in Round 1, must be gathered in an ArrayList in Java and,
@@ -157,38 +156,48 @@ public class G039HW2{
         long start, stop;
         start = System.currentTimeMillis();
 
-        int numberOfPartitions = 5;
-        JavaPairRDD<Float, Float> partitionedData = points.repartition(numberOfPartitions);
+        // MAP PHASE R1
+        // Count the total number of points
+        long totalPoints = points.count();
+        int numPartitions = 5; // You can set the number of partitions
+        long pointsPerPartition = totalPoints / numPartitions;
 
-        ArrayList<Tuple2<Float, Float>> corsets = new ArrayList<>(partitionedData.collect());
-        // Mappatura di ogni float a una coppia di (Key, value)
-        /*JavaPairRDD<Integer, Tuple2<Float, Float>> partitionedData = points.mapToPair(
-                point -> {
-                    Random random = new Random();
-                    int randomKey = random.nextInt(numberOfPartitions);
-                    return new Tuple2<>(randomKey, point);
-                }
-        );
+        // Assign sequential indices and then partition keys to each point
+        JavaPairRDD<Integer, Tuple2<Float, Float>> indexedPoints = points.zipWithIndex()
+                .mapToPair(t -> new Tuple2<>((int)(t._2 / pointsPerPartition), t._1));
 
-        // Group data by partition number to create subsets
-        JavaPairRDD<Integer, Iterable<Tuple2<Float, Float>>> groupedByPartition = partitionedData.groupByKey();
-        // Print the elements of each partition
-        ArrayList<Tuple2<Integer, Iterable<Tuple2<Float, Float>>>> partitions = new ArrayList<>(groupedByPartition.collect());
+        // Group points by partition key
+        JavaPairRDD<Integer, Iterable<Tuple2<Float, Float>>> partitionedPoints = indexedPoints.groupByKey();
+
+        // Output the grouped points to check the partitions
+        ArrayList<Tuple2<Integer, Iterable<Tuple2<Float, Float>>>> partitions = new ArrayList<>(partitionedPoints.collect());
         for (Tuple2<Integer, Iterable<Tuple2<Float, Float>>> partition : partitions) {
-            System.out.println("Partition " + partition._1 + ": " + partition._2);
-        }*/
+            System.out.println("Partition Key: " + partition._1);
+            for (Tuple2<Float, Float> point : partition._2) {
+                System.out.println(point);
+            }
+            System.out.println("---");
+        }
+
+        // REDUCE PHASE R1
+        /*JavaPairRDD<Float, Float> coreset = partitionedPoints.mapValues((partition) -> {
+            ArrayList<Tuple2<Float, Float>> T = new ArrayList<>();
+            T = SequentialFFT(partition, K);
+            return T;
+        });*/
 
         stop = System.currentTimeMillis();
         System.out.printf("Running time of ROUND 1 = %d ms\n", stop - start);
 
+        //ArrayList<Tuple2<Float, Float>> coresets = new ArrayList<>(coreset.collect());
         ///////////////////////////
         // ROUND 2
         ///////////////////////////
         start = System.currentTimeMillis();
 
         ArrayList<Tuple2<Float, Float>> centers = new ArrayList<>();
-        centers = SequentialFFT(corsets, K);
-        Broadcast<ArrayList<Tuple2<Float, Float>>> sharedCenters =sc.broadcast(centers);
+        //centers = SequentialFFT(coresets, K);
+        //Broadcast<ArrayList<Tuple2<Float, Float>>> sharedCenters = sc.broadcast(centers);
 
         stop = System.currentTimeMillis();
         System.out.printf("Running time of ROUND 2 = %d ms\n", stop - start);
@@ -198,7 +207,7 @@ public class G039HW2{
         ///////////////////////////
         start = System.currentTimeMillis();
 
-        float R = clustering(sharedCenters, points);
+        //float R = clustering(sharedCenters, points);
 
         stop = System.currentTimeMillis();
         System.out.printf("Running time of ROUND 3 = %d ms\n", stop - start);
@@ -211,9 +220,10 @@ public class G039HW2{
         //To this purpose we ask you to copy C into a broadcast variable
         //which can be accessed by the RDD methods that will be used to compute R.
 
-        sharedCenters.destroy();
+        //sharedCenters.destroy();
         //MRFFT must compute and print, separately, the running time required by each of the above 3 rounds.
-        return R;
+        //return R;
+        return null;
     }
 
     public static float clustering(Broadcast<ArrayList<Tuple2<Float, Float>>> sharedCenters, JavaPairRDD<Float, Float> points) {

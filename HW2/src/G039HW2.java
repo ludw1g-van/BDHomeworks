@@ -11,6 +11,9 @@ import org.apache.spark.api.java.JavaSparkContext;
 
 public class G039HW2{
 
+    static SparkConf conf = new SparkConf(true).setAppName("Clustering");
+    static JavaSparkContext sc = new JavaSparkContext(conf);
+
     public static void main(String[] args) throws IOException {
 
         // Checking the number of command-line arguments
@@ -26,8 +29,8 @@ public class G039HW2{
         System.out.println(path + " M=" + M + " K=" + K + " L=" + L);
 
         // SPARK SETUP
-        SparkConf conf = new SparkConf(true).setAppName("Clustering");
-        JavaSparkContext sc = new JavaSparkContext(conf);
+        //SparkConf conf = new SparkConf(true).setAppName("Clustering");
+        //JavaSparkContext sc = new JavaSparkContext(conf);
         sc.setLogLevel("WARN");
 
 
@@ -54,10 +57,10 @@ public class G039HW2{
         ArrayList<Tuple2<Float, Float>> C;
         ArrayList<Tuple2<Float, Float>> listOfPoints = new ArrayList<>(inputPoints.collect());
         //System.out.println(listOfPoints);
-        //C = SequentialFFT(listOfPoints, K);
-        //System.out.println(C);
+        C = SequentialFFT(listOfPoints, K);
+        System.out.println(C);
 
-        // MRFFT: 3 round MapReduce algorithm
+        // MR FFT: 3 round MapReduce algorithm
         float D;
         D = MRFFT(inputPoints, K);
 
@@ -65,7 +68,7 @@ public class G039HW2{
         long start, stop;
 
         start = System.currentTimeMillis();
-        //MRApproxOutliers(inputPoints, D, M);
+        MRApproxOutliers(inputPoints, D, M);
         stop = System.currentTimeMillis();
 
         // Print MRApproxOutliers running time.
@@ -144,11 +147,11 @@ public class G039HW2{
      * @param K
      * @return
      */
-    public static Iterator<Tuple2<String, Long>> MRFFT(JavaPairRDD<Float, Float> points, int K){
+    public static float MRFFT(JavaPairRDD<Float, Float> points, int K){
 
         //Rounds 1 and 2 compute a set C of K centers, using the MR-FarthestFirstTraversal algorithm described in class.
-        // The coreset computed in Round 1, must be gathered in an ArrayList in Java and,
-        // in Round 2, the centers are obtained by running SequentialFFT on the coreset.
+        // The corset computed in Round 1, must be gathered in an ArrayList in Java and,
+        // in Round 2, the centers are obtained by running SequentialFFT on the corset.
 
         ///////////////////////////
         // ROUND 1
@@ -171,33 +174,49 @@ public class G039HW2{
 
         // Output the grouped points to check the partitions
         ArrayList<Tuple2<Integer, Iterable<Tuple2<Float, Float>>>> partitions = new ArrayList<>(partitionedPoints.collect());
-        for (Tuple2<Integer, Iterable<Tuple2<Float, Float>>> partition : partitions) {
+        /*for (Tuple2<Integer, Iterable<Tuple2<Float, Float>>> partition : partitions) {
             System.out.println("Partition Key: " + partition._1);
             for (Tuple2<Float, Float> point : partition._2) {
                 System.out.println(point);
             }
             System.out.println("---");
-        }
+        }*/
 
         // REDUCE PHASE R1
-        /*JavaPairRDD<Float, Float> coreset = partitionedPoints.mapValues((partition) -> {
-            ArrayList<Tuple2<Float, Float>> T = new ArrayList<>();
-            T = SequentialFFT(partition, K);
-            return T;
-        });*/
+        JavaRDD<ArrayList<Tuple2<Float, Float>>> corset = partitionedPoints.map((partition) -> {
+            ArrayList<Tuple2<Float, Float>> centersCorset;
+            ArrayList<Tuple2<Float, Float>> partitionToList = new ArrayList<>();
+
+            // Iterate through the Iterable
+            if (partition != null) {
+                for (Tuple2<Float, Float> item : partition._2()) {
+                    partitionToList.add(item);
+                }
+            }
+            centersCorset = SequentialFFT(partitionToList, K);
+            return centersCorset;
+        });
 
         stop = System.currentTimeMillis();
         System.out.printf("Running time of ROUND 1 = %d ms\n", stop - start);
 
-        //ArrayList<Tuple2<Float, Float>> coresets = new ArrayList<>(coreset.collect());
+        ArrayList<List<Tuple2<Float, Float>>> corsets = new ArrayList<>(corset.collect());
+        /*for (List<Tuple2<Float, Float>> c : corsets) {
+            for (Tuple2<Float, Float> point : c) {
+                System.out.println(point);
+            }
+            System.out.println("---");
+        }*/
         ///////////////////////////
         // ROUND 2
         ///////////////////////////
         start = System.currentTimeMillis();
 
         ArrayList<Tuple2<Float, Float>> centers = new ArrayList<>();
-        //centers = SequentialFFT(coresets, K);
-        //Broadcast<ArrayList<Tuple2<Float, Float>>> sharedCenters = sc.broadcast(centers);
+        for (List<Tuple2<Float, Float>> c: corsets) {
+            centers = SequentialFFT((ArrayList<Tuple2<Float, Float>>) c, K);
+        }
+        Broadcast<ArrayList<Tuple2<Float, Float>>> sharedCenters = sc.broadcast(centers);
 
         stop = System.currentTimeMillis();
         System.out.printf("Running time of ROUND 2 = %d ms\n", stop - start);
@@ -207,7 +226,7 @@ public class G039HW2{
         ///////////////////////////
         start = System.currentTimeMillis();
 
-        //float R = clustering(sharedCenters, points);
+        float R = clustering(sharedCenters, points);
 
         stop = System.currentTimeMillis();
         System.out.printf("Running time of ROUND 3 = %d ms\n", stop - start);
@@ -220,10 +239,9 @@ public class G039HW2{
         //To this purpose we ask you to copy C into a broadcast variable
         //which can be accessed by the RDD methods that will be used to compute R.
 
-        //sharedCenters.destroy();
-        //MRFFT must compute and print, separately, the running time required by each of the above 3 rounds.
-        //return R;
-        return null;
+        sharedCenters.destroy();
+        //MR-FFT must compute and print, separately, the running time required by each of the above 3 rounds.
+        return R;
     }
 
     public static float clustering(Broadcast<ArrayList<Tuple2<Float, Float>>> sharedCenters, JavaPairRDD<Float, Float> points) {

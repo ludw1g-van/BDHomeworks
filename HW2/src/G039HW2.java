@@ -1,6 +1,7 @@
 import java.io.IOException;
 import java.util.*;
 
+import org.apache.spark.broadcast.Broadcast;
 import scala.Tuple2;
 
 import org.apache.spark.SparkConf;
@@ -10,6 +11,9 @@ import org.apache.spark.api.java.JavaSparkContext;
 
 public class G039HW2{
 
+    // SPARK SETUP
+    static final SparkConf conf = new SparkConf(true).setAppName("Clustering");
+    static final JavaSparkContext sc = new JavaSparkContext(conf);
 
     public static void main(String[] args) throws IOException {
 
@@ -25,9 +29,6 @@ public class G039HW2{
         int L = Integer.parseInt(args[3]);
         System.out.println(path + " M=" + M + " K=" + K + " L=" + L);
 
-        // SPARK SETUP
-        SparkConf conf = new SparkConf(true).setAppName("Clustering");
-        JavaSparkContext sc = new JavaSparkContext(conf);
         sc.setLogLevel("WARN");
 
 
@@ -42,22 +43,29 @@ public class G039HW2{
 
 
         // Print the total number of points
-        System.out.println("Number of points = " + inputPoints.count());
+        long pointCount = inputPoints.count();
+        System.out.println("Number of points = " + pointCount);
+
+        //Check that K is less than the number of points
+        if(K > pointCount){
+            throw new IllegalArgumentException("K should be <= than the number of points");
+        }
 
         //  Farthest-First Traversal algorithm through standard sequential code
-        ArrayList<Tuple2<Float, Float>> C = new ArrayList<Tuple2<Float, Float>>();
+        ArrayList<Tuple2<Float, Float>> C;
         ArrayList<Tuple2<Float, Float>> listOfPoints = new ArrayList<>(inputPoints.collect());
+        // System.out.println(listOfPoints);
         C = SequentialFFT(listOfPoints, K);
+        System.out.println(C);
 
-        // MRFFT: 3 round MapReduce algorithm
+        // MR FFT: 3 round MapReduce algorithm
         float D;
-        //D = MRFFT(inputPoints, K);
+        D = MRFFT(inputPoints, K);
 
         // MRApproxOutliers HW1
         long start, stop;
-
         start = System.currentTimeMillis();
-        //MRApproxOutliers(inputPoints, D, M);
+        MRApproxOutliers(inputPoints, D, M);
         stop = System.currentTimeMillis();
 
         // Print MRApproxOutliers running time.
@@ -66,59 +74,159 @@ public class G039HW2{
         sc.close();
     }
 
-    //SequentialFFT takes in input a set P of points and an integer parameter K,
-    //and must return a set C of K centers.
-    //Both p and C must be represented as lists (ArrayList in Java and list in Python).
-    //The implementation should run in O(|P|⋅K) time.
+    /**
+     * SequentialFFT takes in input a set P of points and an integer parameter K,
+     * and must return a set C of K centers.
+     * Both p and C must be represented as lists (ArrayList in Java and list in Python).
+     * The implementation should run in O(|P|⋅K) time.
+     * @param points the list of points
+     * @param K the number of centers
+     * @return the list of K centers
+     */
     public static ArrayList<Tuple2<Float, Float>> SequentialFFT(ArrayList<Tuple2<Float, Float>> points, int K){
+        ArrayList<Tuple2<Float, Float>> centers = new ArrayList<>();
 
-        ArrayList<Tuple2<Float, Float>> centers = new ArrayList<Tuple2<Float, Float>>();
+        // HashMap to save the computed distances d(x, S) where x is a point in P-S and S is the set of centers
+        HashMap<Tuple2<Float, Float>, Double> minDistances = new HashMap<>();
 
+        //Add the first center
         centers.add(points.get(0));
+        for(int i=2; i <= K; i++){
 
-        for(int i = 1; i <= K; i++){
-            Tuple2<Float, Float> point;
-            point = maxDistance(points, centers);
-            centers.add(point);
+            // Max distance and maxDistance point
+            Tuple2<Float, Float> maxDistPoint = null;
+            Double maxDistance = 0.0;
+
+            for(Tuple2<Float, Float> point : points){
+
+                // Get the last inserted center
+                Tuple2<Float, Float> lastInsertedCenter = centers.get(centers.size()-1);
+
+                // If the point is in the center set, mark it with a negative minDistance
+                if(point == lastInsertedCenter){
+                    minDistances.put(point, -1.0);
+                }
+
+                // Get the minimum distance calculated before
+                Double prevDistance = minDistances.get(point);
+
+                // Skip the centers
+                if(prevDistance == -1) continue;
+
+                // Calculate the Euclidean distance squared
+                double distance = Math.pow((lastInsertedCenter._1() - point._1()), 2) + Math.pow((lastInsertedCenter._2() - point._2()), 2);
+
+                // Store the minimum distance (the way of calculating d(x, S))
+                if(prevDistance == null || prevDistance > distance){
+                    minDistances.put(point, distance);
+                }
+
+                //update maxDistance and maxDistance Point
+                if(maxDistance < minDistances.get(point)){
+                    maxDistance = minDistances.get(point);
+                    maxDistPoint = point;
+                }
+            }
+
+            // add the found center to the list of centers
+            centers.add(maxDistPoint);
         }
-
         return centers;
     }
 
-    private static Tuple2<Float, Float> maxDistance(ArrayList<Tuple2<Float, Float>> points, ArrayList<Tuple2<Float, Float>> centers){
-        //Tuple2<Float, Float> maxElement;
-        double distance = 0;
-        Tuple2<Float, Float> point = null;
-        HashMap<Tuple2<Float, Float>, Double> pairPointDistance = new HashMap<Tuple2<Float, Float>, Double>();
-
-        for(Tuple2<Float, Float> elem : points){
-            if(!centers.contains(elem)){
-                for(int i=0; i<centers.size(); i++){
-                    double d1 = 0;
-                    double d2 = 0;
-                    d1 = elem._1()-centers.get(i)._1();
-                    d2 = elem._2()-centers.get(i)._2();
-
-                    double distanceTemp = Math.sqrt(Math.pow(d1, 2)+Math.pow(d2, 2));
-                    if(distance<distanceTemp){
-                        distance = distanceTemp;
-                    }
-                }
-                pairPointDistance.put(elem, distance);
-                // if(maxElement.distance<elem.distance){
-                //     maxElement = elem;
-                // }
-            }
-        }
-        point = Collections.max(pairPointDistance.entrySet(), Map.Entry.comparingByValue()).getKey();
-        return point;
-    }
-
+    /**
+     * R1 -> corset
+     * R2 -> k centers (transform the array list into a Broadcast to ship the data structure
+     * to define it you need the spark context, therefore the spark context should be an object variable (static))
+     * R3 -> radius
+     *
+     * @param points
+     * @param K
+     * @return
+     */
     public static float MRFFT(JavaPairRDD<Float, Float> points, int K){
 
         //Rounds 1 and 2 compute a set C of K centers, using the MR-FarthestFirstTraversal algorithm described in class.
-        // The coreset computed in Round 1, must be gathered in an ArrayList in Java and,
-        // in Round 2, the centers are obtained by running SequentialFFT on the coreset.
+        // The corset computed in Round 1, must be gathered in an ArrayList in Java and,
+        // in Round 2, the centers are obtained by running SequentialFFT on the corset.
+
+        ///////////////////////////
+        // ROUND 1
+        ///////////////////////////
+        long start, stop;
+        start = System.currentTimeMillis();
+
+        // MAP PHASE R1
+        // Count the total number of points
+        long totalPoints = points.count();
+        int numPartitions = 5; // You can set the number of partitions
+        long pointsPerPartition = totalPoints / numPartitions;
+
+        // Assign sequential indices and then partition keys to each point
+        JavaPairRDD<Integer, Tuple2<Float, Float>> indexedPoints = points.zipWithIndex()
+                .mapToPair(t -> new Tuple2<>((int)(t._2 / pointsPerPartition), t._1));
+
+        // Group points by partition key
+        JavaPairRDD<Integer, Iterable<Tuple2<Float, Float>>> partitionedPoints = indexedPoints.groupByKey();
+
+        // Output the grouped points to check the partitions
+        ArrayList<Tuple2<Integer, Iterable<Tuple2<Float, Float>>>> partitions = new ArrayList<>(partitionedPoints.collect());
+        /*for (Tuple2<Integer, Iterable<Tuple2<Float, Float>>> partition : partitions) {
+            System.out.println("Partition Key: " + partition._1);
+            for (Tuple2<Float, Float> point : partition._2) {
+                System.out.println(point);
+            }
+            System.out.println("---");
+        }*/
+
+        // REDUCE PHASE R1
+        JavaRDD<ArrayList<Tuple2<Float, Float>>> corset = partitionedPoints.map((partition) -> {
+            ArrayList<Tuple2<Float, Float>> centersCorset;
+            ArrayList<Tuple2<Float, Float>> partitionToList = new ArrayList<>();
+
+            // Iterate through the Iterable
+            if (partition != null) {
+                for (Tuple2<Float, Float> item : partition._2()) {
+                    partitionToList.add(item);
+                }
+            }
+            centersCorset = SequentialFFT(partitionToList, K);
+            return centersCorset;
+        });
+
+        ArrayList<ArrayList<Tuple2<Float, Float>>> corsets = new ArrayList<>(corset.collect());
+
+        stop = System.currentTimeMillis();
+        System.out.printf("Running time of ROUND 1 = %d ms\n", stop - start);
+        /*for (List<Tuple2<Float, Float>> c : corsets) {
+            for (Tuple2<Float, Float> point : c) {
+                System.out.println(point);
+            }
+            System.out.println("---");
+        }*/
+        ///////////////////////////
+        // ROUND 2
+        ///////////////////////////
+        start = System.currentTimeMillis();
+
+        ArrayList<Tuple2<Float, Float>> centers = new ArrayList<>();
+        for (ArrayList<Tuple2<Float, Float>> c: corsets) {
+            centers = SequentialFFT(c, K);
+        }
+        Broadcast<ArrayList<Tuple2<Float, Float>>> sharedCenters = sc.broadcast(centers);
+
+        stop = System.currentTimeMillis();
+        System.out.printf("Running time of ROUND 2 = %d ms\n", stop - start);
+
+        ///////////////////////////
+        // ROUND 3
+        ///////////////////////////
+        start = System.currentTimeMillis();
+
+        float R = clustering(sharedCenters, points);
+
+        stop = System.currentTimeMillis();
+        System.out.printf("Running time of ROUND 3 = %d ms\n", stop - start);
 
         //Round 3 computes and returns the radius R of the clustering induced by the centers,
         //that is the maximum, over all points x∈P, of the distance dist(x,C).
@@ -128,9 +236,26 @@ public class G039HW2{
         //To this purpose we ask you to copy C into a broadcast variable
         //which can be accessed by the RDD methods that will be used to compute R.
 
-        //MRFFT must compute and print, separately, the running time required by each of the above 3 rounds.
+        sharedCenters.destroy();
+        //MR-FFT must compute and print, separately, the running time required by each of the above 3 rounds.
+        return R;
+    }
 
-        return 0;
+    public static float clustering(Broadcast<ArrayList<Tuple2<Float, Float>>> sharedCenters, JavaPairRDD<Float, Float> points) {
+
+        JavaRDD<Float> minDistances = points.map(point -> {
+            ArrayList<Tuple2<Float, Float>> centers = sharedCenters.value();
+            float minDistance = Float.MAX_VALUE;
+            for (Tuple2<Float, Float> center : centers) {
+                float distance = (float) (Math.pow((center._1() - point._1()), 2) + Math.pow((center._2() - point._2()), 2));
+                if (distance < minDistance) {
+                    minDistance = distance;
+                }
+            }
+            return minDistance;
+        });
+
+        return minDistances.reduce(Math::max);
     }
 
     public static void MRApproxOutliers(JavaPairRDD<Float, Float> points, float D, int M){

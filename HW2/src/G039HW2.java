@@ -11,8 +11,9 @@ import org.apache.spark.api.java.JavaSparkContext;
 
 public class G039HW2{
 
-    static SparkConf conf = new SparkConf(true).setAppName("Clustering");
-    static JavaSparkContext sc = new JavaSparkContext(conf);
+    // SPARK SETUP
+    static final SparkConf conf = new SparkConf(true).setAppName("Clustering");
+    static final JavaSparkContext sc = new JavaSparkContext(conf);
 
     public static void main(String[] args) throws IOException {
 
@@ -28,9 +29,6 @@ public class G039HW2{
         int L = Integer.parseInt(args[3]);
         System.out.println(path + " M=" + M + " K=" + K + " L=" + L);
 
-        // SPARK SETUP
-        //SparkConf conf = new SparkConf(true).setAppName("Clustering");
-        //JavaSparkContext sc = new JavaSparkContext(conf);
         sc.setLogLevel("WARN");
 
 
@@ -56,7 +54,7 @@ public class G039HW2{
         //  Farthest-First Traversal algorithm through standard sequential code
         ArrayList<Tuple2<Float, Float>> C;
         ArrayList<Tuple2<Float, Float>> listOfPoints = new ArrayList<>(inputPoints.collect());
-        //System.out.println(listOfPoints);
+        // System.out.println(listOfPoints);
         C = SequentialFFT(listOfPoints, K);
         System.out.println(C);
 
@@ -66,7 +64,6 @@ public class G039HW2{
 
         // MRApproxOutliers HW1
         long start, stop;
-
         start = System.currentTimeMillis();
         MRApproxOutliers(inputPoints, D, M);
         stop = System.currentTimeMillis();
@@ -114,7 +111,7 @@ public class G039HW2{
                 Double prevDistance = minDistances.get(point);
 
                 // Skip the centers
-                if(prevDistance != null && prevDistance == -1) continue;
+                if(prevDistance == -1) continue;
 
                 // Calculate the Euclidean distance squared
                 double distance = Math.pow((lastInsertedCenter._1() - point._1()), 2) + Math.pow((lastInsertedCenter._2() - point._2()), 2);
@@ -197,10 +194,10 @@ public class G039HW2{
             return centersCorset;
         });
 
+        ArrayList<ArrayList<Tuple2<Float, Float>>> corsets = new ArrayList<>(corset.collect());
+
         stop = System.currentTimeMillis();
         System.out.printf("Running time of ROUND 1 = %d ms\n", stop - start);
-
-        ArrayList<List<Tuple2<Float, Float>>> corsets = new ArrayList<>(corset.collect());
         /*for (List<Tuple2<Float, Float>> c : corsets) {
             for (Tuple2<Float, Float> point : c) {
                 System.out.println(point);
@@ -213,8 +210,8 @@ public class G039HW2{
         start = System.currentTimeMillis();
 
         ArrayList<Tuple2<Float, Float>> centers = new ArrayList<>();
-        for (List<Tuple2<Float, Float>> c: corsets) {
-            centers = SequentialFFT((ArrayList<Tuple2<Float, Float>>) c, K);
+        for (ArrayList<Tuple2<Float, Float>> c: corsets) {
+            centers = SequentialFFT(c, K);
         }
         Broadcast<ArrayList<Tuple2<Float, Float>>> sharedCenters = sc.broadcast(centers);
 

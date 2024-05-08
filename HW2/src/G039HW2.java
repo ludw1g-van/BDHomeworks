@@ -1,6 +1,8 @@
 import java.io.IOException;
 import java.util.*;
 
+import org.apache.spark.broadcast.Broadcast;
+import org.apache.spark.storage.StorageLevel;
 import scala.Tuple2;
 
 import org.apache.spark.SparkConf;
@@ -10,35 +12,49 @@ import org.apache.spark.api.java.JavaSparkContext;
 
 public class G039HW2{
 
+    /**
+     * Spark context
+     */
+    static JavaSparkContext sc;
+
+    /**
+     * Partition number
+     */
+    static int L;
 
     public static void main(String[] args) throws IOException {
+
 
         // Checking the number of command-line arguments
         if (args.length != 4) {
             throw new IllegalArgumentException("USAGE: file_path M K L");
         }
 
+        SparkConf conf = new SparkConf(true).setAppName("Clustering");
+        conf.set("spark.locality.wait", "0s");
+
+        //init spark context
+        sc = new JavaSparkContext(conf);
+
         // Prints the command-line arguments and stores M,K,L
         String path = args[0];
         int M = Integer.parseInt(args[1]);
         int K = Integer.parseInt(args[2]);
-        int L = Integer.parseInt(args[3]);
+        L = Integer.parseInt(args[3]);
         System.out.println(path + " M=" + M + " K=" + K + " L=" + L);
 
-        // SPARK SETUP
-        SparkConf conf = new SparkConf(true).setAppName("Clustering");
-        JavaSparkContext sc = new JavaSparkContext(conf);
+        // set Spark log level
         sc.setLogLevel("WARN");
 
 
-        // INPUT READING
+        // Input reading and partitioning
         JavaRDD<String> rawData = sc.textFile(path);
         JavaPairRDD<Float, Float> inputPoints = rawData.mapToPair(line -> {
             String[] parts = line.split(",");
             float x = Float.parseFloat(parts[0]);
             float y = Float.parseFloat(parts[1]);
             return new Tuple2<>(x, y);
-        }).repartition(L).cache();
+        }).persist(StorageLevel.MEMORY_AND_DISK());
 
 
         // Print the total number of points
@@ -50,25 +66,22 @@ public class G039HW2{
             throw new IllegalArgumentException("K should be <= than the number of points");
         }
 
-        //  Farthest-First Traversal algorithm through standard sequential code
-        ArrayList<Tuple2<Float, Float>> C;
-        ArrayList<Tuple2<Float, Float>> listOfPoints = new ArrayList<>(inputPoints.collect());
-        System.out.println(listOfPoints);
-        C = SequentialFFT(listOfPoints, K);
-        System.out.println(C);
 
-        // MRFFT: 3 round MapReduce algorithm
-        float D;
-        //D = MRFFT(inputPoints, K);
+        // MRFFT
+        float D = MRFFT(inputPoints, K);
 
-        // MRApproxOutliers HW1
+        // print the radius
+        System.out.println("Radius = " + D);
+
+        // variables to get the execution time of MRApproxOutliers
         long start, stop;
 
+        // executes MRApproxOutliers
         start = System.currentTimeMillis();
-        //MRApproxOutliers(inputPoints, D, M);
+        MRApproxOutliers(inputPoints, D, M);
         stop = System.currentTimeMillis();
 
-        // Print MRApproxOutliers running time.
+        // Print MRApproxOutliers running time
         System.out.printf("Running time of MRApproxOutliers = %d ms\n", stop - start);
 
         sc.close();
@@ -83,55 +96,62 @@ public class G039HW2{
      * @param K the number of centers
      * @return the list of K centers
      */
-    public static ArrayList<Tuple2<Float, Float>> SequentialFFT(ArrayList<Tuple2<Float, Float>> points, int K){
-        ArrayList<Tuple2<Float, Float>> centers = new ArrayList<>();
+    public static ArrayList<Tuple2<Float, Float>> SequentialFFT(final ArrayList<Tuple2<Float, Float>> points, final int K){
+        // The array of centers that will be returned
+        Tuple2<Float, Float>[] centers = new Tuple2[K];
 
         // HashMap to save the computed distances d(x, S) where x is a point in P-S and S is the set of centers
-        HashMap<Tuple2<Float, Float>, Double> minDistances = new HashMap<>();
+        HashMap<Tuple2<Float, Float>, Float> minDistances = new HashMap<>();
 
         //Add the first center
-        centers.add(points.get(0));
+        centers[0] = points.get(0);
+
+        // number of centers in the array
+        int centersNum = 1;
+
         for(int i=2; i <= K; i++){
 
             // Max distance and maxDistance point
             Tuple2<Float, Float> maxDistPoint = null;
-            Double maxDistance = 0.0;
+            float maxDistance = 0F;
 
             for(Tuple2<Float, Float> point : points){
 
                 // Get the last inserted center
-                Tuple2<Float, Float> lastInsertedCenter = centers.get(centers.size()-1);
+                Tuple2<Float, Float> lastInsertedCenter = centers[centersNum - 1];
 
                 // If the point is in the center set, mark it with a negative minDistance
                 if(point == lastInsertedCenter){
-                    minDistances.put(point, -1.0);
+                    minDistances.put(point, -1F);
                 }
 
                 // Get the minimum distance calculated before
-                Double prevDistance = minDistances.get(point);
+                Float prevDistance = minDistances.get(point);
 
                 // Skip the centers
                 if(prevDistance != null && prevDistance == -1) continue;
 
                 // Calculate the Euclidean distance squared
-                double distance = Math.pow((lastInsertedCenter._1() - point._1()), 2) + Math.pow((lastInsertedCenter._2() - point._2()), 2);
+                float distance = (((lastInsertedCenter._1 - point._1)*(lastInsertedCenter._1 - point._1)) + ((lastInsertedCenter._2 - point._2)*(lastInsertedCenter._2 - point._2)));
 
                 // Store the minimum distance (the way of calculating d(x, S))
                 if(prevDistance == null || prevDistance > distance){
                         minDistances.put(point, distance);
                 }
 
+                float currentMinDistance = minDistances.get(point);
                 //update maxDistance and maxDistance Point
-                if(maxDistance < minDistances.get(point)){
-                    maxDistance = minDistances.get(point);
+                if(maxDistance < currentMinDistance){
+                    maxDistance = currentMinDistance;
                     maxDistPoint = point;
                 }
             }
 
             // add the found center to the list of centers
-            centers.add(maxDistPoint);
+            centers[centersNum++] = maxDistPoint;
+
         }
-        return centers;
+        return new ArrayList<>(Arrays.asList(centers));
     }
 
     /**
@@ -140,28 +160,66 @@ public class G039HW2{
      * to define it you need the spark context, therefore the spark context should be an object variable (static))
      * R3 -> radius
      *
-     * @param points
-     * @param K
-     * @return
+     * @param points input set of points.
+     * @param K number of centers.
+     * @return the radius of the clustering induced by the centers.
      */
     public static float MRFFT(JavaPairRDD<Float, Float> points, int K){
 
-        //Rounds 1 and 2 compute a set C of K centers, using the MR-FarthestFirstTraversal algorithm described in class.
-        // The coreset computed in Round 1, must be gathered in an ArrayList in Java and,
-        // in Round 2, the centers are obtained by running SequentialFFT on the coreset.
+        // start and stop variables to store the time.
+        long start, stop;
 
-        //Round 3 computes and returns the radius R of the clustering induced by the centers,
-        //that is the maximum, over all points x∈P, of the distance dist(x,C).
-        //The radius R must be a float. To compute R you cannot download P
-        //into a local data structure, since it may be very large, and must keep it stored as an RDD.
-        //However, the set of centers C computed in Round 2, can be used as a global variable.
-        //To this purpose we ask you to copy C into a broadcast variable
-        //which can be accessed by the RDD methods that will be used to compute R.
+        //ROUND 1
+        start = System.currentTimeMillis();
+        JavaRDD<Tuple2<Float, Float>> result = points.repartition(L).mapPartitions(partition -> {
+            ArrayList<Tuple2<Float, Float>> tempList = new ArrayList<>();
+            while(partition.hasNext()) tempList.add(partition.next());
+            return SequentialFFT(tempList, K).iterator();
+        }).persist(StorageLevel.MEMORY_AND_DISK());
+        result.count();
+        stop = System.currentTimeMillis();
+        System.out.printf("Running time of MRFFT Round 1 = %d ms\n", stop - start);
 
-        //MRFFT must compute and print, separately, the running time required by each of the above 3 rounds.
+        //ROUND 2
+        start = System.currentTimeMillis();
+        ArrayList<Tuple2<Float, Float>> coreset = new ArrayList<>(result.collect());
+        ArrayList<Tuple2<Float, Float>> C = SequentialFFT(coreset, K); // result of the FFT algorithm on the coreset
+        stop = System.currentTimeMillis();
+        System.out.printf("Running time of MRFFT Round 2 = %d ms\n", stop - start);
 
-        return 0;
+        // ROUND 3
+        Broadcast<ArrayList<Tuple2<Float, Float>>> sharedCenters = sc.broadcast(C);
+        start = System.currentTimeMillis();
+        float R = clustering(sharedCenters, points);
+        stop = System.currentTimeMillis();
+        System.out.printf("Running time of MRFFT Round 3 = %d ms\n", stop - start);
+
+        sharedCenters.destroy();
+        return R;
     }
+
+    /**
+     * Computes and returns the radius R of the clustering induced by the centers,
+     * that is the maximum, over all points x in P of the distance dist(x,C).
+     *
+     * @param sharedCenters broadcast variable containing the centers of the cluster.
+     * @param points input set of points.
+     * @return radius of the clustering induced by the centers.
+     */
+    public static float clustering(Broadcast<ArrayList<Tuple2<Float, Float>>> sharedCenters, JavaPairRDD<Float, Float> points) {
+        return points.map(point -> {
+            ArrayList<Tuple2<Float, Float>> centers = sharedCenters.value();
+            float minDistance = Float.MAX_VALUE;
+            for (Tuple2<Float, Float> center : centers) {
+                float distance = (float) (Math.pow((point._1() - center._1()), 2) + Math.pow((point._2() - center._2()), 2));
+                if (distance < minDistance) {
+                    minDistance = distance;
+                }
+            }
+            return (float) Math.sqrt(minDistance);
+        }).reduce(Math::max);
+    }
+
 
     public static void MRApproxOutliers(JavaPairRDD<Float, Float> points, float D, int M){
 

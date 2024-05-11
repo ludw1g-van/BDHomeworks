@@ -100,8 +100,8 @@ public class G039HW2{
         // The array of centers that will be returned
         Tuple2<Float, Float>[] centers = new Tuple2[K];
 
-        // HashMap to save the computed distances d(x, S) where x is a point in P-S and S is the set of centers
-        HashMap<Tuple2<Float, Float>, Float> minDistances = new HashMap<>();
+        // Array of min distances
+        float[] minDistances = new float[points.size()];
 
         //Add the first center
         centers[0] = points.get(0);
@@ -112,45 +112,44 @@ public class G039HW2{
         for(int i=2; i <= K; i++){
 
             // Max distance and maxDistance point
-            Tuple2<Float, Float> maxDistPoint = null;
-            float maxDistance = 0F;
+            int maxDistPoint = -1;
+            float maxDistance = 0;
 
-            for(Tuple2<Float, Float> point : points){
+            for(int k = 0; k < points.size(); k++){
+                // Get the point
+                Tuple2<Float, Float> point = points.get(k);
 
                 // Get the last inserted center
                 Tuple2<Float, Float> lastInsertedCenter = centers[centersNum - 1];
 
                 // If the point is in the center set, mark it with a negative minDistance
                 if(point == lastInsertedCenter){
-                    minDistances.put(point, -1F);
+                    minDistances[k] = -1;
+                    continue; // skip the center
                 }
 
-                // Get the minimum distance calculated before
-                Float prevDistance = minDistances.get(point);
-
                 // Skip the centers
-                if(prevDistance != null && prevDistance == -1) continue;
+                if(minDistances[k] == -1) continue;
 
                 // Calculate the Euclidean distance squared
                 float distance = (((lastInsertedCenter._1 - point._1)*(lastInsertedCenter._1 - point._1)) + ((lastInsertedCenter._2 - point._2)*(lastInsertedCenter._2 - point._2)));
 
                 // Store the minimum distance (the way of calculating d(x, S))
-                if(prevDistance == null || prevDistance > distance){
-                        minDistances.put(point, distance);
+                if(minDistances[k] == 0 || minDistances[k] > distance){
+                        minDistances[k] = distance;
                 }
 
-                float currentMinDistance = minDistances.get(point);
                 //update maxDistance and maxDistance Point
-                if(maxDistance < currentMinDistance){
-                    maxDistance = currentMinDistance;
-                    maxDistPoint = point;
+                if(maxDistance < minDistances[k]){
+                    maxDistance = minDistances[k];
+                    maxDistPoint = k;
                 }
             }
 
             // add the found center to the list of centers
-            centers[centersNum++] = maxDistPoint;
-
+            centers[centersNum++] = points.get(maxDistPoint);
         }
+
         return new ArrayList<>(Arrays.asList(centers));
     }
 

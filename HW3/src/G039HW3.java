@@ -33,6 +33,9 @@ public class G039HW3{
         if(!(delta > 0 && delta < 1)){
             throw new IllegalArgumentException("The argument delta must be in (0,1)");
         }
+        if(!(portExp >= 8886 && portExp <= 8889)){
+            throw new IllegalArgumentException("The argument portExp must be in [8886, 8889]");
+        }
 
         // SPARK SETUP
         SparkConf conf = new SparkConf(true).setAppName("StickySampling");

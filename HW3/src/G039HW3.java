@@ -1,20 +1,12 @@
 import org.apache.spark.SparkConf;
-import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.StorageLevels;
 import org.apache.spark.streaming.Durations;
 import org.apache.spark.streaming.api.java.JavaStreamingContext;
 import scala.Tuple2;
-import scala.Float;
 
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.locks.ReentrantLock;
-import java.util.concurrent.locks.Lock;
+import java.util.*;
 import java.util.concurrent.Semaphore;
-
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Random;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class G039HW3{
     public static void main(String[] args) throws Exception {
@@ -30,7 +22,8 @@ public class G039HW3{
         float epsilon = java.lang.Float.parseFloat(args[2]);
         float delta = java.lang.Float.parseFloat(args[3]);
         int portExp = Integer.parseInt(args[4]);
-        System.out.println("n=" + n + " phi=" + phi + " epsilon=" + epsilon + " delta=" + delta + " portExp=" + portExp);
+        System.out.println("INPUT PROPERTIES");
+        System.out.println("n = " + n + " phi = " + phi + " epsilon = " + epsilon + " delta = " + delta + " port = " + portExp);
 
         // Arguments validation
         if(!(phi > 0 && phi < 1)){
@@ -55,7 +48,7 @@ public class G039HW3{
         // Beware that the data generator we are using is very fast, so the suggestion
         // is to use batches of less than a second, otherwise you might exhaust the
         // JVM memory.
-        JavaStreamingContext sc = new JavaStreamingContext(conf, Durations.milliseconds(10));
+        JavaStreamingContext sc = new JavaStreamingContext(conf, Durations.milliseconds(100));
         sc.sparkContext().setLogLevel("ERROR");
 
         // TECHNICAL DETAIL:
@@ -82,11 +75,23 @@ public class G039HW3{
         // Hash Table for the distinct elements
         HashMap<Long, Long> histogram = new HashMap<>();
 
+        // Size m of the Reservoir Sampling
+        int m = (int) Math.ceil(1 / phi);
+
+        // The size m of the m-sample S (stored in reservoir ArrayList)
+        ArrayList<Long> reservoir = new ArrayList<>(m);
+
         // Atomic integer used to keep track of the instant of time (also between batches)
         AtomicInteger t = new AtomicInteger(0);
 
         // Randomizer for generating probabilities (used in Reservoir sampling)
         Random random = new Random();
+
+        // Hash Table of the Sticky Sampling
+        HashMap<Long, Long> S = new HashMap<>();
+
+        // Counter of number of batches
+        AtomicInteger countBatch = new AtomicInteger(0);
 
         // &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
         // PROCESS PHASE (TRUE FREQUENCIES, RESERVOIR, EPSILON-AFI STICKY SAMPLING)
@@ -102,7 +107,7 @@ public class G039HW3{
                     if (streamLength[0] < n) {
                         long batchSize = batch.count();
                         streamLength[0] += batchSize;
-
+                        System.out.println("Batch Count: " + streamLength[0]);
                         //1-The true frequent items with respect to the threshold phi
 
                         // Map obtained by counting how many times a given number appear in the stream batch
@@ -118,10 +123,6 @@ public class G039HW3{
                         }
 
                         //2-An m-sample of Σ using Reservoir Sampling of, with m= ⌈1/phi⌉
-
-                        // The size m of the m-sample S (stored in reservoir ArrayList)
-                        int m = (int) Math.ceil(1 / phi);
-                        ArrayList<Long> reservoir = new ArrayList<>(m);
 
                         // Given a batch, foreachPartition work on an iterator of the batch RDD of strings.
                         batch.foreachPartition(items -> {
@@ -153,7 +154,7 @@ public class G039HW3{
                                         reservoir.add(Long.parseLong(items.next()));
                                     }
                                 }
-                            t.incrementAndGet();
+                                t.incrementAndGet();
                             }
                         });
 
@@ -164,6 +165,52 @@ public class G039HW3{
                             stoppingSemaphore.release();
                         }
                     }
+
+                    //3-The epsilon-Approximate Frequent Items computed using Sticky Sampling with confidence parameter delta
+
+//                    countBatch.incrementAndGet();
+//
+//                    batch.foreachPartition(items -> {
+//
+//                        // Xt is the first element of the batch Bi
+//                        boolean isFirst = true;
+//
+//                        // Recalibration
+//                        if(isFirst && items.hasNext()){
+//                            isFirst = false;
+//                            for (Map.Entry<Long, Long> entry : S.entrySet()) {
+//                                Long x = entry.getKey();
+//                                Long fe = entry.getValue();
+//
+//                                // Number of tails before head of an unbiased coin
+//                                boolean isHead = false;
+//                                Long tau = 0L;
+//                                float prob;
+//                                while(!isHead){
+//                                    tau = tau+1;
+//                                    prob = random.nextFloat();
+//                                    if(prob > 0.5){
+//                                        isHead = true;
+//                                    }
+//                                }
+//
+//                                if(fe-tau > 0){
+//                                    fe = fe-tau;
+//                                }else{
+//                                    S.remove(entry.getKey());
+//                                }
+//                            }
+//                        }
+//
+//                        Long item = Long.parseLong(items.next());
+//                        float prob = random.nextFloat();
+//
+//                        if(S.containsKey(item)){
+//                            S.compute(item, (k, count) -> count+1);
+//                        }else if(prob <= 1/Math.pow(2, countBatch.doubleValue())){
+//                            S.put(item , 1L);
+//                        }
+//                    });
                 });
 
         // &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
@@ -185,77 +232,91 @@ public class G039HW3{
         System.out.println("Streaming engine stopped");
 
         // COMPUTE AND PRINT FINAL STATISTICS
-        System.out.println("Number of items processed = " + streamLength[0]);
-        System.out.println("Number of distinct items = " + histogram.size());
 
-        // Find the largest item
-        long max = 0L;
-        for (Long key : histogram.keySet()) {
-            if (key > max) {max = key;}
-        }
-        System.out.println("Largest item = " + max);
 
-        // Print true frequent items
+        // Print information for the EXACT ALGORITHM
+        System.out.println("EXACT ALGORITHM");
+
+        // The size of the data structure used to compute the true frequent items
+        System.out.println("Number of items in the data structure = " + histogram.size());
+
+        // The threshold frequency
         double thresholdFrequency = phi * streamLength[0];
+
+        // The number of true frequent items
+        int countTrue = 0;
+
+        // True frequent items
+        ArrayList<Long> items = new ArrayList<>();
+
         for (Long key : histogram.keySet()) {
             if (histogram.get(key) >= thresholdFrequency) {
-                System.out.println("frequency of item " + key.toString() + "=" + histogram.get(key));
+                countTrue++;
+                items.add(key);
+            }
+        }
+        System.out.println("Number of true frequent items = " + countTrue);
+
+        // Sort the items
+        Collections.sort(items);
+
+        // Print the items
+        for (Long it : items) {
+                System.out.println(it);
+        }
+
+
+        // Print information for the RESERVOIR SAMPLING
+        System.out.println("RESERVOIR SAMPLING");
+        //The size m of the Reservoir sample
+        System.out.println("Size m of the sample = " + m);
+
+        //The number of estimated frequent items (i.e., distinct items in the sample)
+        int countEstimateReservoir = 0;
+        for (Long elem : reservoir) {
+            if (histogram.get(elem) >= thresholdFrequency) {
+                countEstimateReservoir++;
+            }
+        }
+        System.out.println("Number of estimated frequent items = " + countEstimateReservoir);
+
+        //The estimated frequent items, in increasing order (one item per line). Next to each item print a "+" if the item is a true freuent one, and "-" otherwise.
+        Collections.sort(reservoir);
+
+        System.out.println("Estimated frequent items:");
+        for (Long elem : reservoir) {
+            if (histogram.get(elem) >= thresholdFrequency) {
+                System.out.println(elem + " +");
+            }else{
+                System.out.println(elem + " -");
+            }
+        }
+
+
+        // Print information for the STICKY SAMPLING
+        System.out.println("STICKY SAMPLING");
+
+        //The size of the Hash Table
+        System.out.println("Number of items in the Hash Table = " + S.size());
+
+        //The number of estimated frequent items (i.e., the items considered frequent by Sticky sampling)
+        int countEstimateSticky = 0;
+        for (Long key : S.keySet()) {
+            if (histogram.get(key) >= thresholdFrequency) {
+                countEstimateSticky++;
+            }
+        }
+
+        System.out.println("Number of estimated frequent items = " + countEstimateSticky);
+        System.out.println("Estimated frequent items:");
+
+        //The estimated frequent items, in increasing order (one item per line). Next to each item print a "+" if the item is a true freuent one, and "-" otherwise.
+        for (Long key : S.keySet()) {
+            if (histogram.get(key) >= thresholdFrequency) {
+                System.out.println(key + " +");
+            }else{
+                System.out.println(key + " -");
             }
         }
     }
 }
-
-// GARBAGE COLLECTION
-//3-The epsilon-Approximate Frequent Items computed using Sticky Sampling with confidence parameter delta
-                        /*final Map<String, Integer> sample = new HashMap<>();
-                        double r = Math.log(1 / (delta*phi)) / epsilon;  // Sample rate
-
-                        // Create a DStream that connects to hostname:port
-                        JavaPairDStream<String, Integer> lines = jssc.socketTextStream(hostname, port)
-                                .mapToPair(s -> new Tuple2<>(s, 1))
-                                .reduceByKey(Integer::sum);
-
-                        batch.foreachPartition(iterator -> {
-                            while (iterator.hasNext()) {
-                                Tuple2<String, Integer> tuple = iterator.next();
-                                String item = tuple._1();
-                                int count = tuple._2();
-                                int currentCount = sample.getOrDefault(item, 0);
-
-                                if (currentCount > 0) {
-                                    // If already in the sample, increment the count
-                                    sample.put(item, currentCount + count);
-                                } else {
-                                    // Calculate current sampling rate
-                                    double n = rdd.context().getTotalStorageMemory(); // This is a placeholder; calculate n properly
-                                    double samplingRate = r / n;
-
-                                    // Add new item with calculated probability
-                                    if (random.nextDouble() < samplingRate) {
-                                        sample.put(item, count);
-                                    }
-                                }
-                            }
-                        });
-
-                        // Periodically print the sample
-                        lines.foreachRDD(rdd -> {
-                            System.out.println("Sampled items:");
-                            sample.forEach((key, value) -> {
-                                if (value > (phi - epsilon) * rdd.count()) {
-                                    System.out.println("Item: " + key + ", Count: " + value);
-                                }
-                            });
-                        });
-
-                        // Extract the distinct items from the batch
-                        Map<Long, Long> batchItems = batch
-                                .mapToPair(s -> new Tuple2<>(Long.parseLong(s), 1L))
-                                .reduceByKey((i1, i2) -> 1L)
-                                .collectAsMap();
-                        // Update the streaming state
-                        for (Map.Entry<Long, Long> pair : batchItems.entrySet()) {
-                            if (!histogram.containsKey(pair.getKey())) {
-                                histogram.put(pair.getKey(), 1L);
-                            }
-                        }*/

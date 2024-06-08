@@ -5,10 +5,17 @@ import org.apache.spark.streaming.api.java.JavaStreamingContext;
 import scala.Tuple2;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 
-public class G039HW3{
+public class G039HW3 {
+    // Atomic integer used to keep track of the instant of time (also between batches)
+    static AtomicInteger t = new AtomicInteger(1);
+
+    // The size m of the m-sample S (stored in reservoir Linked Queue)
+    static ArrayList<Long> reservoir = new ArrayList<>();
+
     public static void main(String[] args) throws Exception {
 
         // Checking the number of command-line arguments
@@ -26,29 +33,29 @@ public class G039HW3{
         System.out.println("n = " + n + " phi = " + phi + " epsilon = " + epsilon + " delta = " + delta + " port = " + portExp);
 
         // Arguments validation
-        if(!(phi > 0 && phi < 1)){
+        if (!(phi > 0 && phi < 1)) {
             throw new IllegalArgumentException("The argument phi must be in (0,1)");
         }
-        if(!(epsilon > 0 && epsilon < 1)){
+        if (!(epsilon > 0 && epsilon < 1)) {
             throw new IllegalArgumentException("The argument epsilon must be in (0,1)");
         }
-        if(!(delta > 0 && delta < 1)){
+        if (!(delta > 0 && delta < 1)) {
             throw new IllegalArgumentException("The argument delta must be in (0,1)");
         }
-        if(!(portExp >= 8886 && portExp <= 8889)){
+        if (!(portExp >= 8886 && portExp <= 8889)) {
             throw new IllegalArgumentException("The argument portExp must be in [8886, 8889]");
         }
 
         // SPARK SETUP
         SparkConf conf = new SparkConf(true)
                 .setMaster("local[*]")
-                .setAppName("StickySampling");
+                .setAppName("Sampling");
 
         // Here, with the duration you can control how large to make your batches.
         // Beware that the data generator we are using is very fast, so the suggestion
         // is to use batches of less than a second, otherwise you might exhaust the
         // JVM memory.
-        JavaStreamingContext sc = new JavaStreamingContext(conf, Durations.milliseconds(100));
+        JavaStreamingContext sc = new JavaStreamingContext(conf, Durations.milliseconds(10));
         sc.sparkContext().setLogLevel("ERROR");
 
         // TECHNICAL DETAIL:
@@ -78,14 +85,8 @@ public class G039HW3{
         // Size m of the Reservoir Sampling
         int m = (int) Math.ceil(1 / phi);
 
-        // The size m of the m-sample S (stored in reservoir ArrayList)
-        ArrayList<Long> reservoir = new ArrayList<>(m);
-
-        // Atomic integer used to keep track of the instant of time (also between batches)
-        AtomicInteger t = new AtomicInteger(0);
-
         // Randomizer for generating probabilities (used in Reservoir sampling)
-        Random random = new Random();
+        Random random = new Random(42);
 
         // Hash Table of the Sticky Sampling
         HashMap<Long, Long> S = new HashMap<>();
@@ -107,7 +108,7 @@ public class G039HW3{
                     if (streamLength[0] < n) {
                         long batchSize = batch.count();
                         streamLength[0] += batchSize;
-                        System.out.println("Batch Count: " + streamLength[0]);
+
                         //1-The true frequent items with respect to the threshold phi
 
                         // Map obtained by counting how many times a given number appear in the stream batch
@@ -119,54 +120,35 @@ public class G039HW3{
                         // For each key appearing in my batch, add a new entry in the histogram
                         // for counting how many instances of a number appear in the whole streaming
                         for (Map.Entry<Long, Long> pair : batchCounts.entrySet()) {
-                            histogram.compute(pair.getKey(), (k, count) -> count == null? pair.getValue() : count + pair.getValue());
+                            histogram.compute(pair.getKey(), (k, count) -> count == null ? pair.getValue() : count + pair.getValue());
                         }
 
                         //2-An m-sample of Σ using Reservoir Sampling of, with m= ⌈1/phi⌉
 
                         // Given a batch, foreachPartition work on an iterator of the batch RDD of strings.
-                        batch.foreachPartition(items -> {
+                        batch.foreach(item -> {
 
-                            // Run until the batch is finished
-                            while(items.hasNext()){
+                            // If the instant of time is less than m, add the element to the m-sample
+                            if (t.intValue() <= m) {
+                                reservoir.add(Long.parseLong(item));
+                            } else {
+                                // Probability of getting a substitution of an element in the m-sample with the current one
+                                // N.B.: the probability decreases with time t (to keep uniform probability)
+                                float probThreshold = (float) m / t.intValue();
 
-                                // If the instant of time is less than m, add the element to the m-sample
-                                if(t.intValue() <= reservoir.size()){
-                                    reservoir.add(Long.parseLong(items.next()));
-                                } else {
+                                // Randomized probability
+                                float prob = random.nextFloat();
 
-                                    // Probability of getting a substitution of an element in the m-sample with the current one
-                                    // N.B.: the probability decreases with time t (to keep uniform probability)
-                                    float probThreshold = (float) reservoir.size() / t.intValue();
-
-                                    // Randomized probability
-                                    float prob = random.nextFloat();
-
-                                    // Randomized index of the m-sample
-                                    int randIndex = random.nextInt(reservoir.size());
-
-                                    // The potentially substituted element in the m-sample
-                                    Long substituted = reservoir.get(randIndex);
-
-                                    // Check whether perform substitution and do it eventually
-                                    if(prob <= probThreshold){
-                                        reservoir.remove(substituted);
-                                        reservoir.add(Long.parseLong(items.next()));
-                                    }
+                                // Check whether perform substitution and do it eventually
+                                if (prob < probThreshold) {
+                                    // Substitute a random item of the m-sample
+                                    reservoir.set(random.nextInt(reservoir.size()), Long.parseLong(item));
                                 }
-                                t.incrementAndGet();
                             }
+                            t.incrementAndGet();
                         });
 
-                        if (batchSize > 0) {
-                            System.out.println("Batch size at time [" + time + "] is: " + batchSize);
-                        }
-                        if (streamLength[0] >= n) {
-                            stoppingSemaphore.release();
-                        }
-                    }
-
-                    //3-The epsilon-Approximate Frequent Items computed using Sticky Sampling with confidence parameter delta
+                        //3-The epsilon-Approximate Frequent Items computed using Sticky Sampling with confidence parameter delta
 
 //                    countBatch.incrementAndGet();
 //
@@ -211,11 +193,16 @@ public class G039HW3{
 //                            S.put(item , 1L);
 //                        }
 //                    });
+
+                        if (batchSize > 0) {
+                            System.out.println("Batch size at time [" + time + "] is: " + batchSize);
+                        }
+                        if (streamLength[0] >= n) {
+                            stoppingSemaphore.release();
+                        }
+                    }
                 });
 
-        // &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
-        // PRINT STATISTICS PHASE
-        // &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
 
         // MANAGING STREAMING SPARK CONTEXT
         System.out.println("Starting streaming engine");
@@ -231,8 +218,9 @@ public class G039HW3{
         sc.stop(false, false);
         System.out.println("Streaming engine stopped");
 
-        // COMPUTE AND PRINT FINAL STATISTICS
-
+        // &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+        // PRINT STATISTICS PHASE
+        // &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
 
         // Print information for the EXACT ALGORITHM
         System.out.println("EXACT ALGORITHM");
@@ -247,22 +235,22 @@ public class G039HW3{
         int countTrue = 0;
 
         // True frequent items
-        ArrayList<Long> items = new ArrayList<>();
+        ArrayList<Long> trueFreqItems = new ArrayList<>();
 
         for (Long key : histogram.keySet()) {
             if (histogram.get(key) >= thresholdFrequency) {
                 countTrue++;
-                items.add(key);
+                trueFreqItems.add(key);
             }
         }
         System.out.println("Number of true frequent items = " + countTrue);
 
         // Sort the items
-        Collections.sort(items);
+        Collections.sort(trueFreqItems);
 
         // Print the items
-        for (Long it : items) {
-                System.out.println(it);
+        for (Long it : trueFreqItems) {
+            System.out.println(it);
         }
 
 
@@ -271,23 +259,27 @@ public class G039HW3{
         //The size m of the Reservoir sample
         System.out.println("Size m of the sample = " + m);
 
+        List<Long> reservoirEstFreqItems = new ArrayList<>();
+
         //The number of estimated frequent items (i.e., distinct items in the sample)
         int countEstimateReservoir = 0;
         for (Long elem : reservoir) {
-            if (histogram.get(elem) >= thresholdFrequency) {
+            if (!reservoirEstFreqItems.contains(elem)) {
                 countEstimateReservoir++;
+                reservoirEstFreqItems.add(elem);
             }
         }
         System.out.println("Number of estimated frequent items = " + countEstimateReservoir);
 
         //The estimated frequent items, in increasing order (one item per line). Next to each item print a "+" if the item is a true freuent one, and "-" otherwise.
-        Collections.sort(reservoir);
+
+        Collections.sort(reservoirEstFreqItems);
 
         System.out.println("Estimated frequent items:");
-        for (Long elem : reservoir) {
-            if (histogram.get(elem) >= thresholdFrequency) {
+        for (Long elem : reservoirEstFreqItems) {
+            if (trueFreqItems.contains(elem)) {
                 System.out.println(elem + " +");
-            }else{
+            } else {
                 System.out.println(elem + " -");
             }
         }
@@ -314,7 +306,7 @@ public class G039HW3{
         for (Long key : S.keySet()) {
             if (histogram.get(key) >= thresholdFrequency) {
                 System.out.println(key + " +");
-            }else{
+            } else {
                 System.out.println(key + " -");
             }
         }

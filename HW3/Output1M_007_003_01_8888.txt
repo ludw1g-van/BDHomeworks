@@ -1,0 +1,47 @@
+INPUT PROPERTIES
+n = 1000000 phi = 0.07 epsilon = 0.03 delta = 0.1 port = 8888
+EXACT ALGORITHM
+Number of items in the data structure = 39886
+Number of true frequent items = 10
+True frequent items:
+195773912
+339323283
+434415286
+641486445
+819911327
+870070186
+1472610405
+1590293530
+1690049656
+1936875793
+RESERVOIR SAMPLING
+Size m of the sample = 15
+Number of estimated frequent items = 11
+Estimated frequent items:
+195773912 +
+339323283 +
+434415286 +
+632507218 -
+637121204 -
+641486445 +
+819911327 +
+978604355 -
+1472610405 +
+1590293530 +
+1936875793 +
+STICKY SAMPLING
+Number of items in the Hash Table = 20
+Number of estimated frequent items = 12
+Estimated frequent items:
+195773912 +
+339323283 +
+434415286 +
+637121204 -
+641486445 +
+819911327 +
+870070186 +
+978604355 -
+1472610405 +
+1590293530 +
+1690049656 +
+1936875793 +

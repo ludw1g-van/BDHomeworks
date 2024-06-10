@@ -10,23 +10,26 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
 
 public class G039HW3 {
-    // Atomic integer used to keep track of the instant of time (also between batches)
-    static AtomicInteger t = new AtomicInteger(1);
+    // Sticky sampling lock to access the HashTable
+    static ReentrantLock stickyLock = new ReentrantLock();
 
     // The size m of the m-sample S (stored in reservoir Linked Queue)
     static ArrayList<Long> reservoir = new ArrayList<>();
 
-    // Sticky sampling lock to access the HashTable
-    static ReentrantLock stickyLock = new ReentrantLock();
+    // Reservoir sampling lock to access the reservoir ArrayList
+    static ReentrantLock reservoirLock = new ReentrantLock();
 
     // Hash Table of the Sticky Sampling
     static HashMap<Long, Long> StickySampHashMap = new HashMap<>();
 
-    // Processed item number (used in sticky sampling)
-    static final long[] processedItemNumReservoir = new long[1];
+    // True frequency item counter
+    static AtomicInteger processedTrueFreqItems = new AtomicInteger(0);
 
     // Processed item number (used in sticky sampling)
-    static final long[] processedItemNumSticky = new long[1];
+    static AtomicInteger processedItemNumReservoir = new AtomicInteger(0);
+
+    // Processed item number (used in sticky sampling)
+    static AtomicInteger processedItemNumSticky = new AtomicInteger(0);
 
     // Keep track of the previous bin in Sticky sampling to understand if an item is the first of a bin
     static final int[] prevBin = {-1};
@@ -70,7 +73,7 @@ public class G039HW3 {
         // Beware that the data generator we are using is very fast, so the suggestion
         // is to use batches of less than a second, otherwise you might exhaust the
         // JVM memory.
-        JavaStreamingContext sc = new JavaStreamingContext(conf, Durations.milliseconds(10));
+        JavaStreamingContext sc = new JavaStreamingContext(conf, Durations.milliseconds(100));
         sc.sparkContext().setLogLevel("ERROR");
 
         // TECHNICAL DETAIL:
@@ -82,7 +85,6 @@ public class G039HW3 {
         // wait on the call. Then, in the `foreachRDD` call, when the stopping condition
         // is met the semaphore is released, basically giving "green light" to the main
         // thread to shut down the computation.
-
         Semaphore stoppingSemaphore = new Semaphore(1);
         stoppingSemaphore.acquire();
 
@@ -124,11 +126,17 @@ public class G039HW3 {
                         // Map obtained by counting how many times a given number appear in the stream batch
                         Map<Long, Long> batchCounts = batch
                                 .mapToPair(s -> new Tuple2<>(Long.parseLong(s), 1L))
+                                .filter((item) -> {
+                                    if(processedTrueFreqItems.intValue() == n) {
+                                        return false;
+                                    }
+                                    processedTrueFreqItems.incrementAndGet();
+                                    return true;
+                                })
                                 .reduceByKey(Long::sum)
                                 .collectAsMap();
-                        //TO-DO: Add a filter before the reduceByKey to select only n items and no more
 
-                        // For each key appearing in my batch, add a new entry in the histogram
+                        // For each key appearing in my batch, add a new entry in the trueFreqElements hash map
                         // for counting how many instances of a number appear in the whole streaming
                         for (Map.Entry<Long, Long> pair : batchCounts.entrySet()) {
                             trueFreqElements.compute(pair.getKey(), (k, count) -> count == null ? pair.getValue() : count + pair.getValue());
@@ -140,15 +148,20 @@ public class G039HW3 {
                         batch.foreach(item -> {
                             // If the number of processed items is equal to n
                             // do not process the remaining items in the batch
-                            if(processedItemNumReservoir[0] == n) return;
+                            if(processedItemNumReservoir.get() == n) return;
 
-                            // If the instant of time is less than m, add the element to the m-sample
-                            if (t.intValue() <= m) {
-                                reservoir.add(Long.parseLong(item));
+                            // If the instant of time (processed item starting from index 1) is less than m, add the element to the m-sample
+                            if (processedItemNumReservoir.get() + 1 <= m) {
+                                reservoirLock.lock();
+                                try{
+                                    reservoir.add(Long.parseLong(item));
+                                } finally {
+                                    reservoirLock.unlock();
+                                }
                             } else {
                                 // Probability of getting a substitution of an element in the m-sample with the current one
                                 // N.B.: the probability decreases with time t (to keep uniform probability)
-                                float probThreshold = (float) m / t.intValue();
+                                float probThreshold = (float) m / processedItemNumReservoir.get();
 
                                 // Randomized probability
                                 float prob = random.nextFloat();
@@ -156,28 +169,33 @@ public class G039HW3 {
                                 // Check whether perform substitution and do it eventually
                                 if (prob < probThreshold) {
                                     // Substitute a random item of the m-sample
-                                    reservoir.set(random.nextInt(reservoir.size()), Long.parseLong(item));
+                                    reservoirLock.lock();
+                                    try{
+                                        reservoir.set(random.nextInt(reservoir.size()), Long.parseLong(item));
+                                    } finally {
+                                        reservoirLock.unlock();
+                                    }
                                 }
                             }
-                            t.incrementAndGet();
-                            processedItemNumReservoir[0]++;
+                            processedItemNumReservoir.incrementAndGet();
                         });
 
                         //3-The epsilon-Approximate Frequent Items computed using Sticky Sampling with confidence parameter delta
                         batch.foreach(item -> {
                             // If the number of processed items is equal to n
                             // do not process the remaining items in the batch
-                            if(processedItemNumSticky[0] == n) return;
+                            if(processedItemNumSticky.get() == n) return;
 
                             // Calculate the batch number of the processed item
                             // N.B. |B_0| = 2*r and |B_i| = (2^i)*r, i >= 1
                             int i = 0;
 
                             // Check whether the bin in which is contained the processed item is B_i with i >= 1
-                            if (processedItemNumSticky[0] >= 2 * r) {
-                                // The formula to calculate the bin is ⌊log_2(n/r)⌋, where n is the processed item number (processedItemNum)
+                            if (processedItemNumSticky.get() >= 2 * r) {
+                                // The formula to calculate the bin index to which the item appertain is ⌊log_2(n/r)⌋,
+                                // where n is the processed item number (processedItemNum)
                                 // N.B. n ∈ [0, +∞)
-                                i = (int) Math.floor(Math.log(processedItemNumSticky[0] / r) / Math.log(2));
+                                i = (int) Math.floor(Math.log(processedItemNumSticky.get() / r) / Math.log(2));
                             }
 
 
@@ -185,7 +203,6 @@ public class G039HW3 {
 
                             // If the item is the first of the batch
                             if (i != prevBin[0]) {
-                                System.out.println("First item of bin " + i);
                                 ArrayList<Long> keys;
                                 stickyLock.lock();
                                 try{
@@ -237,12 +254,10 @@ public class G039HW3 {
                             prevBin[0] = i;
 
                             // Update the processed item count
-                            processedItemNumSticky[0]++;
+                            processedItemNumSticky.incrementAndGet();
                         });
 
-//                        if (batchSize > 0) {
-//                            System.out.println("Batch size at time [" + time + "] is: " + batchSize);
-//                        }
+                        // If the stream has exceeded the limit, release the semaphore
                         if (streamLength[0] >= n) {
                             stoppingSemaphore.release();
                         }
@@ -251,21 +266,17 @@ public class G039HW3 {
 
 
         // MANAGING STREAMING SPARK CONTEXT
-        System.out.println("Starting streaming engine");
         sc.start();
-        System.out.println("Waiting for shutdown condition");
         stoppingSemaphore.acquire();
-        System.out.println("Stopping the streaming engine");
 
-        // This print is to understand if all went well
-        System.out.printf("Expected items: %d   Processed items: %d\n", streamLength[0], processedItemNumSticky[0]);
+        // This print is to understand how many items were processed
+//        System.out.printf("Total retrieved items: %d\nProcessed True Frequent Item: %d\nProcessed Reservoir items: %d\nProcessed Sticky items: %d\n", streamLength[0], processedTrueFreqItems.get(), processedItemNumReservoir.get(), processedItemNumSticky.get());
 
         // NOTE: You will see some data being processed even after the
         // shutdown command has been issued: This is because we are asking
         // to stop "gracefully", meaning that any outstanding work
         // will be done.
         sc.stop(false, false);
-        System.out.println("Streaming engine stopped");
 
         // &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
         // PRINT STATISTICS PHASE
@@ -278,7 +289,7 @@ public class G039HW3 {
         System.out.println("Number of items in the data structure = " + trueFreqElements.size());
 
         // The threshold frequency
-        double thresholdFrequency = phi * streamLength[0];
+        double thresholdFrequency = phi * processedTrueFreqItems.get();
 
         // The number of true frequent items
         int countTrue = 0;
@@ -287,6 +298,7 @@ public class G039HW3 {
         ArrayList<Long> trueFreqItems = new ArrayList<>();
 
         for (Long key : trueFreqElements.keySet()) {
+            // Save the true frequent items in the data structure trueFreqItems according to the threshold and increment the counter
             if (trueFreqElements.get(key) >= thresholdFrequency) {
                 countTrue++;
                 trueFreqItems.add(key);
@@ -305,14 +317,18 @@ public class G039HW3 {
 
         // Print information for the RESERVOIR SAMPLING
         System.out.println("RESERVOIR SAMPLING");
-        //The size m of the Reservoir sample
+
+        // The size m of the Reservoir sample
         System.out.println("Size m of the sample = " + m);
 
+        // The number of estimated frequent items (i.e., distinct items in the sample)
+        int countEstimateReservoir = 0;
+
+        // The estimated frequent items (i.e., distinct items in the sample)
         ArrayList<Long> reservoirEstFreqItems = new ArrayList<>();
 
-        //The number of estimated frequent items (i.e., distinct items in the sample)
-        int countEstimateReservoir = 0;
         for (Long elem : reservoir) {
+            // Count only distinct items
             if (!reservoirEstFreqItems.contains(elem)) {
                 countEstimateReservoir++;
                 reservoirEstFreqItems.add(elem);
@@ -320,10 +336,11 @@ public class G039HW3 {
         }
         System.out.println("Number of estimated frequent items = " + countEstimateReservoir);
 
-        //The estimated frequent items, in increasing order (one item per line). Next to each item print a "+" if the item is a true freuent one, and "-" otherwise.
-
+        // Sort the items
         Collections.sort(reservoirEstFreqItems);
 
+        // The estimated frequent items, in increasing order (one item per line).
+        // Next to each item print a "+" if the item is a true frequent one, and "-" otherwise.
         System.out.println("Estimated frequent items:");
         for (Long elem : reservoirEstFreqItems) {
             if (trueFreqItems.contains(elem)) {
@@ -346,7 +363,7 @@ public class G039HW3 {
         // The number of estimated frequent items (i.e., the items considered frequent by Sticky sampling)
         int countEstimateSticky = 0;
         for (Map.Entry<Long, Long> entry : StickySampHashMap.entrySet()) {
-            if (entry.getValue() >= (phi-epsilon)* processedItemNumSticky[0]) {
+            if (entry.getValue() >= (phi-epsilon)*processedItemNumSticky.get()) {
                 countEstimateSticky++;
                 stickyEstFreqItems.add(entry.getKey());
             }

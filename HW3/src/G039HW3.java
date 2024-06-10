@@ -73,7 +73,7 @@ public class G039HW3 {
         // Beware that the data generator we are using is very fast, so the suggestion
         // is to use batches of less than a second, otherwise you might exhaust the
         // JVM memory.
-        JavaStreamingContext sc = new JavaStreamingContext(conf, Durations.milliseconds(100));
+        JavaStreamingContext sc = new JavaStreamingContext(conf, Durations.milliseconds(10));
         sc.sparkContext().setLogLevel("ERROR");
 
         // TECHNICAL DETAIL:
@@ -167,7 +167,7 @@ public class G039HW3 {
                                 float prob = random.nextFloat();
 
                                 // Check whether perform substitution and do it eventually
-                                if (prob < probThreshold) {
+                                if (prob <= probThreshold) {
                                     // Substitute a random item of the m-sample
                                     reservoirLock.lock();
                                     try{
@@ -243,7 +243,7 @@ public class G039HW3 {
                             try{
                                 if (StickySampHashMap.containsKey(tempItem)) {
                                     StickySampHashMap.compute(tempItem, (k, count) -> count + 1);
-                                } else if (prob < (1 / Math.pow(2, i))) {
+                                } else if (prob <= (1 / Math.pow(2, i))) {
                                     StickySampHashMap.put(tempItem, 1L);
                                 }
                             } finally {

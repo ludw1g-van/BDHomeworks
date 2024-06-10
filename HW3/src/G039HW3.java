@@ -11,13 +11,10 @@ import java.util.concurrent.locks.ReentrantLock;
 
 public class G039HW3 {
     // Sticky sampling lock to access the HashTable
-    static ReentrantLock stickyLock = new ReentrantLock();
+//    static ReentrantLock stickyLock = new ReentrantLock();
 
     // The size m of the m-sample S (stored in reservoir Linked Queue)
     static ArrayList<Long> reservoir = new ArrayList<>();
-
-    // Reservoir sampling lock to access the reservoir ArrayList
-    static ReentrantLock reservoirLock = new ReentrantLock();
 
     // Hash Table of the Sticky Sampling
     static HashMap<Long, Long> StickySampHashMap = new HashMap<>();
@@ -115,7 +112,6 @@ public class G039HW3 {
         sc.socketTextStream("algo.dei.unipd.it", portExp, StorageLevels.MEMORY_AND_DISK)
                 // For each batch, to the following.
                 .foreachRDD((batch, time) -> {
-
                     // Check whether the streaming has exceeded the limit
                     if (streamLength[0] < n) {
                         long batchSize = batch.count();
@@ -152,12 +148,7 @@ public class G039HW3 {
 
                             // If the instant of time (processed item starting from index 1) is less than m, add the element to the m-sample
                             if (processedItemNumReservoir.get() + 1 <= m) {
-                                reservoirLock.lock();
-                                try{
-                                    reservoir.add(Long.parseLong(item));
-                                } finally {
-                                    reservoirLock.unlock();
-                                }
+                                reservoir.add(Long.parseLong(item));
                             } else {
                                 // Probability of getting a substitution of an element in the m-sample with the current one
                                 // N.B.: the probability decreases with time t (to keep uniform probability)
@@ -169,12 +160,7 @@ public class G039HW3 {
                                 // Check whether perform substitution and do it eventually
                                 if (prob <= probThreshold) {
                                     // Substitute a random item of the m-sample
-                                    reservoirLock.lock();
-                                    try{
-                                        reservoir.set(random.nextInt(reservoir.size()), Long.parseLong(item));
-                                    } finally {
-                                        reservoirLock.unlock();
-                                    }
+                                    reservoir.set(random.nextInt(reservoir.size()), Long.parseLong(item));
                                 }
                             }
                             processedItemNumReservoir.incrementAndGet();
@@ -204,12 +190,7 @@ public class G039HW3 {
                             // If the item is the first of the batch
                             if (i != prevBin[0]) {
                                 ArrayList<Long> keys;
-                                stickyLock.lock();
-                                try{
-                                    keys = new ArrayList<>(StickySampHashMap.keySet());
-                                } finally {
-                                    stickyLock.unlock();
-                                }
+                                keys = new ArrayList<>(StickySampHashMap.keySet());
 
                                 for (long key : keys) {
                                     // Number of tails before head of an unbiased coin
@@ -222,15 +203,11 @@ public class G039HW3 {
                                             tau--;
                                         }
                                     }
-                                    stickyLock.lock();
-                                    try {
-                                        if (StickySampHashMap.get(key) - tau > 0) {
-                                            StickySampHashMap.put(key, StickySampHashMap.get(key) - tau);
-                                        } else {
-                                            StickySampHashMap.remove(key);
-                                        }
-                                    } finally {
-                                        stickyLock.unlock();
+
+                                    if (StickySampHashMap.get(key) - tau > 0) {
+                                        StickySampHashMap.put(key, StickySampHashMap.get(key) - tau);
+                                    } else {
+                                        StickySampHashMap.remove(key);
                                     }
 
                                 }
@@ -239,16 +216,13 @@ public class G039HW3 {
                             long tempItem = Long.parseLong(item);
                             float prob = random.nextFloat();
 
-                            stickyLock.lock();
-                            try{
-                                if (StickySampHashMap.containsKey(tempItem)) {
-                                    StickySampHashMap.compute(tempItem, (k, count) -> count + 1);
-                                } else if (prob <= (1 / Math.pow(2, i))) {
-                                    StickySampHashMap.put(tempItem, 1L);
-                                }
-                            } finally {
-                              stickyLock.unlock();
+
+                            if (StickySampHashMap.containsKey(tempItem)) {
+                                StickySampHashMap.compute(tempItem, (k, count) -> count + 1);
+                            } else if (prob <= (1 / Math.pow(2, i))) {
+                                StickySampHashMap.put(tempItem, 1L);
                             }
+
 
                             // Update the prevBin
                             prevBin[0] = i;
